@@ -22,6 +22,7 @@ NNN-YYYY-MM-DD-short-title.md
 | [006](006-2026-08-04-robot-face-adoption.md) | 2026-08-04 | Adopting the `robot-face` kiosk into this repo | ✅ Adopted |
 | [007](007-2026-08-04-microros-bringup.md) | 2026-08-04 | micro-ROS on Teensy — Dual Serial, console preserved, reconnect | ✅ Working |
 | [008](008-2026-08-04-control-panel-camera-lidar.md) | 2026-08-04 | Control panel — authenticated camera stream + live LiDAR view | ✅ Deployed |
+| [009](009-2026-08-04-lidar-motor-kept-spinning.md) | 2026-08-04 | LiDAR motor kept spinning after the service stopped | ✅ Fixed |
 
 Entries are either **problems** (001, 003) or **design decision records** (002). Both belong here — a decision you cannot reconstruct the reasoning for is as expensive as a bug you cannot reproduce.
 

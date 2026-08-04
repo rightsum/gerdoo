@@ -11,10 +11,13 @@ ExecStart=%h/robot-face/deploy/run-lidar.sh
 # lidar is unplugged should surface as a failure rather than a restart loop.
 Restart=no
 
-# The motor keeps spinning until the driver closes the port, so give it a
-# moment to stop cleanly before SIGKILL.
-TimeoutStopSec=10
-KillSignal=SIGTERM
+# The C1's motor holds its last commanded state: kill the driver uncleanly and
+# the lidar spins until someone unplugs it. rclcpp only runs its shutdown
+# handler — and therefore setMotorSpeed(0) — on SIGINT, so send that, and give
+# run-lidar.sh room to also issue the raw STOP command as a backstop.
+KillSignal=SIGINT
+TimeoutStopSec=20
+KillMode=mixed
 
 StandardOutput=journal
 StandardError=journal

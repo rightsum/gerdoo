@@ -577,6 +577,17 @@ Teensy 4.1 defaults to 4482 Hz — audible whine, must be set explicitly. **Do n
 
 Datasheet Figure 2-6. Five-position housing, four wires used. **No MOTOCTL pin on C1** (some third-party pages claim one — wrong). Motor is closed-loop internal; speed set by command, and it cannot start/stop independently of the laser scan command.
 
+> ⚠️ **The motor holds its last command — killing the driver does not stop it.**
+> There is no MOTOCTL line to de-assert and no hardware timeout. Once told to scan, the C1 keeps spinning until it is told to stop or loses power. A driver that is killed, crashes, or is sent SIGTERM leaves the motor running indefinitely — it does **not** free-run on USB power, but it does keep obeying its last order.
+>
+> Any tool that starts a scan must send an explicit stop. ROS nodes need **SIGINT** (`rclcpp` shutdown handlers do not run on SIGTERM through `ros2 launch`), and `rplidar.service` also writes the raw stop as a backstop.
+>
+> **Emergency stop, no ROS needed:**
+> ```bash
+> printf "\xA5\x25" > /dev/ttyUSB0     # RPLIDAR protocol: A5 25 = STOP
+> ```
+> See [`logs/009`](logs/009-2026-08-04-lidar-motor-kept-spinning.md).
+
 | Wire | Signal | Type | Min | Typ | Max |
 |---|---|---|---|---|---|
 | Red | VCC | Power | 4.8V | 5V | 5.2V |

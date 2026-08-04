@@ -199,4 +199,5 @@ Only if the XL4015 has **two** pots.
 8. **Check what is already installed before writing code.** `rplidar_ros` saved ~2 weeks of firmware work (log 004).
 9. **Scope `set +u` around any `source` of a ROS setup script.** They are not `set -u` clean — `setup.bash` dies on `AMENT_TRACE_SETUP_FILES` (log 007).
 10. **In service units, exec the real binary, not `ros2 run`.** The wrapper orphans the process, which then holds the serial device (log 007).
-11. **`pkill -f` / `pgrep -f` over SSH can match the shell running them** and kill your own connection. Resolve the PID first, then `kill` it. Hit three times in one session.
+11. **`pkill -f` / `pgrep -f` over SSH can match the shell running them** and kill your own connection or return bogus counts. Resolve the PID first, then `kill` it. Hit four times in one session.
+12. **Process death is not a stop signal.** Anything holding physical state — motor, heater, valve, laser — needs an explicit shutdown command *and* a backstop for when the graceful path fails. ROS units need `KillSignal=SIGINT` (log 009).
