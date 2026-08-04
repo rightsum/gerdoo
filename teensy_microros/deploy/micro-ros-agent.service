@@ -1,0 +1,26 @@
+[Unit]
+Description=micro-ROS agent — Teensy 4.1 bridge to ROS 2
+Documentation=file:///home/jarvis/gerdoo/logs/007-2026-08-04-microros-bringup.md
+After=default.target
+
+[Service]
+Type=simple
+ExecStart=%h/gerdoo/teensy_microros/deploy/run-agent.sh
+
+# The agent must come back on its own: the Teensy vanishes for ~6s on every
+# reflash, and the board may enumerate after this unit starts. The launcher
+# waits up to 60s for the device, so a restart here means something real
+# happened (device gone, agent crashed), not just a slow boot.
+Restart=always
+RestartSec=3
+
+# Default KillMode=control-group already reaps the whole cgroup, but the
+# launcher execs the agent binary directly so the main PID is the agent
+# itself — no wrapper to orphan. See logs/007.
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=micro-ros-agent
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Robot · Control</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100dvh;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: radial-gradient(120% 100% at 50% 0%, #16203a 0%, #0b1020 55%, #070a14 100%);
+      color: #e8ecf6;
+    }
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 18px 22px; border-bottom: 1px solid rgba(255,255,255,0.07);
+    }
+    header .title { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 17px; }
+    header .title .dot { width: 9px; height: 9px; border-radius: 50%; background: #37d67a; box-shadow: 0 0 10px #37d67a; }
+    header a { color: #93a0bd; font-size: 13px; text-decoration: none; padding: 7px 12px; border-radius: 9px; border: 1px solid rgba(255,255,255,0.1); }
+    header a:hover { color: #fff; background: rgba(255,255,255,0.05); }
+    main { max-width: 760px; margin: 0 auto; padding: 26px 22px 60px; }
+    .now {
+      display: flex; align-items: center; gap: 14px; padding: 16px 18px; margin-bottom: 26px;
+      background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px;
+    }
+    .now .emoji { font-size: 34px; }
+    .now .meta small { display: block; color: #8493b3; font-size: 11px; text-transform: uppercase; letter-spacing: .8px; }
+    .now .meta strong { font-size: 20px; font-weight: 600; }
+    .warn { margin-bottom: 22px; padding: 12px 14px; font-size: 13px; color: #ffe0a3;
+      background: rgba(255,180,0,0.1); border: 1px solid rgba(255,180,0,0.3); border-radius: 12px; }
+    h2 { font-size: 12px; color: #8493b3; text-transform: uppercase; letter-spacing: 1px; margin: 0 0 14px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+    .mood {
+      display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 20px 12px;
+      background: rgba(255,255,255,0.035); border: 1.5px solid rgba(255,255,255,0.08);
+      border-radius: 16px; cursor: pointer; color: #e8ecf6; font: inherit;
+      transition: transform .08s, border-color .15s, background .15s;
+    }
+    .mood:hover { background: rgba(255,255,255,0.06); transform: translateY(-2px); }
+    .mood:active { transform: translateY(0); }
+    .mood .emoji { font-size: 36px; line-height: 1; }
+    .mood .label { font-size: 14px; font-weight: 500; }
+    .mood.active { border-color: #5b8cff; background: rgba(91,140,255,0.14); box-shadow: 0 0 0 1px #5b8cff inset; }
+    .swatches { display: flex; gap: 14px; flex-wrap: wrap; }
+    .swatch { width: 54px; height: 54px; border-radius: 50%; cursor: pointer; padding: 0;
+      background: var(--c); border: 3px solid rgba(255,255,255,0.12);
+      box-shadow: 0 0 18px -2px var(--c); transition: transform .1s, border-color .15s; }
+    .swatch:hover { transform: scale(1.06); }
+    .swatch.active { border-color: #fff; transform: scale(1.06); }
+    .toast { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%) translateY(20px);
+      background: #2a3350; color: #fff; padding: 11px 18px; border-radius: 12px; font-size: 14px;
+      opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; box-shadow: 0 12px 30px rgba(0,0,0,.5); }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    /* --- sensor panels --- */
+    .panel { margin-top: 30px; background: rgba(255,255,255,0.035);
+      border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; overflow: hidden; }
+    .panel-head { display: flex; align-items: center; gap: 12px; padding: 14px 16px; }
+    .panel-head h2 { margin: 0; flex: 1; }
+    .panel-body { padding: 0 16px 16px; }
+    .panel-body.empty { display: none; }
+    .status { font-size: 11px; color: #8493b3; font-family: ui-monospace, monospace; }
+    .status .led { display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+      background: #4a5578; margin-right: 6px; vertical-align: middle; }
+    .status.on .led { background: #37d67a; box-shadow: 0 0 8px #37d67a; }
+    .status.err .led { background: #ff5f56; box-shadow: 0 0 8px #ff5f56; }
+    .toggle { position: relative; width: 50px; height: 28px; border-radius: 999px; cursor: pointer;
+      background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.14);
+      padding: 0; transition: background .18s; flex: none; }
+    .toggle::after { content: ''; position: absolute; top: 2px; left: 2px; width: 22px; height: 22px;
+      border-radius: 50%; background: #e8ecf6; transition: transform .18s; }
+    .toggle.on { background: #2f7d4f; border-color: #37d67a; }
+    .toggle.on::after { transform: translateX(22px); }
+    .toggle.busy { opacity: .55; pointer-events: none; }
+    .toggle:disabled { opacity: .3; cursor: not-allowed; }
+    .stage { position: relative; background: #070d1c; border-radius: 12px; overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.07); display: flex; align-items: center;
+      justify-content: center; min-height: 180px; }
+    .stage img { display: block; width: 100%; height: auto; }
+    .stage canvas { display: block; width: 100%; }
+    .hint { font-size: 12.5px; color: #8493b3; margin: 10px 2px 0; line-height: 1.5; }
+    .hint code { background: rgba(255,255,255,0.07); padding: 1px 5px; border-radius: 5px; font-size: 12px; }
+    .rangebar { display: flex; align-items: center; gap: 10px; margin-top: 12px; font-size: 12px; color: #8493b3; }
+    .rangebar input { flex: 1; accent-color: #5b8cff; }
+    .locked { padding: 14px 16px; font-size: 13px; color: #ffe0a3;
+      background: rgba(255,180,0,0.08); border-top: 1px solid rgba(255,180,0,0.2); }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="title"><span class="dot"></span> Robot Control</div>
+    <a href="{{ url_for('logout') }}">Sign out</a>
+  </header>
+  <main>
+    {% if not has_password %}
+    <div class="warn">⚠ No password is set — this panel is open to anyone on your network. Set one with <code>python3 manage.py set-password</code>.</div>
+    {% endif %}
+    <div class="now">
+      <div class="emoji" id="now-emoji">🙂</div>
+      <div class="meta">
+        <small>Current mood</small>
+        <strong id="now-label">…</strong>
+      </div>
+    </div>
+
+    <h2>Set mood</h2>
+    <div class="grid" id="grid">
+      {% for m in moods %}
+      <button class="mood" data-mood="{{ m.id }}" data-emoji="{{ m.emoji or '🙂' }}">
+        <span class="emoji">{{ m.emoji or '🙂' }}</span>
+        <span class="label">{{ m.label }}</span>
+      </button>
+      {% endfor %}
+    </div>
+
+    <h2 style="margin-top:30px">Eye color</h2>
+    <div class="swatches" id="swatches">
+      {% for c in colors %}
+      <button class="swatch" data-color="{{ c }}" style="--c: {{ c }}" aria-label="{{ c }}"></button>
+      {% endfor %}
+    </div>
+
+    <!-- ---------------- Camera ---------------- -->
+    <section class="panel" id="camera-panel">
+      <div class="panel-head">
+        <h2>Camera</h2>
+        <span class="status" id="cam-status"><span class="led"></span><span id="cam-status-text">off</span></span>
+        <button class="toggle" id="cam-toggle" aria-label="Toggle camera"
+                {% if not has_password or not camera_present %}disabled{% endif %}></button>
+      </div>
+      {% if has_password %}
+      <div class="panel-body empty" id="cam-body">
+        <div class="stage" id="cam-stage"><img id="cam-img" alt="Camera stream"></div>
+        <p class="hint" id="cam-hint"></p>
+      </div>
+      {% if not camera_present %}
+      <div class="locked">Camera not detected. Plug in the Brio 500 and reload — <code>ls /dev/v4l/by-id/</code></div>
+      {% endif %}
+      {% else %}
+      <div class="locked">
+        🔒 Set a control-panel password before enabling the camera.
+        A live video feed must not be open to your whole network.<br>
+        <code>cd ~/robot-face &amp;&amp; python3 manage.py set-password &amp;&amp; systemctl --user restart robot-face</code>
+      </div>
+      {% endif %}
+    </section>
+
+    <!-- ---------------- LiDAR ---------------- -->
+    <section class="panel" id="lidar-panel">
+      <div class="panel-head">
+        <h2>LiDAR</h2>
+        <span class="status" id="lidar-status"><span class="led"></span><span id="lidar-status-text">off</span></span>
+        <button class="toggle" id="lidar-toggle" aria-label="Toggle lidar"
+                {% if not has_password or not lidar_installed %}disabled{% endif %}></button>
+      </div>
+      {% if has_password %}
+      <div class="panel-body empty" id="lidar-body">
+        <div class="stage"><canvas id="lidar-canvas"></canvas></div>
+        <div class="rangebar">
+          <span>Range</span>
+          <input type="range" id="lidar-range" min="1" max="16" step="1" value="6">
+          <span id="lidar-range-label">6 m</span>
+        </div>
+        <p class="hint">Forward is up. Warmer points are closer.</p>
+      </div>
+      {% if not lidar_installed %}
+      <div class="locked">
+        <code>rplidar.service</code> is not installed. Deploy it:
+        <code>./deploy/deploy.sh</code>
+      </div>
+      {% endif %}
+      {% else %}
+      <div class="locked">🔒 Set a control-panel password before starting the lidar.</div>
+      {% endif %}
+    </section>
+  </main>
+  <div class="toast" id="toast"></div>
+
+  <script src="{{ url_for('static', filename='lidar-view.js') }}"></script>
+  <script>
+    const grid = document.getElementById('grid');
+    const swatches = document.getElementById('swatches');
+    const nowEmoji = document.getElementById('now-emoji');
+    const nowLabel = document.getElementById('now-label');
+    const toast = document.getElementById('toast');
+    const moods = {{ moods | tojson }};
+    const byId = Object.fromEntries(moods.map(m => [m.id, m]));
+
+    let toastTimer;
+    function showToast(msg) {
+      toast.textContent = msg; toast.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.remove('show'), 1600);
+    }
+
+    function reflect(state) {
+      if (state.mood) {
+        const m = byId[state.mood];
+        if (m) { nowEmoji.textContent = m.emoji || '🙂'; nowLabel.textContent = m.label; }
+        document.querySelectorAll('.mood').forEach(b =>
+          b.classList.toggle('active', b.dataset.mood === state.mood));
+      }
+      if (state.color) {
+        document.querySelectorAll('.swatch').forEach(b =>
+          b.classList.toggle('active', b.dataset.color === state.color));
+      }
+    }
+
+    async function post(patch, okMsg) {
+      reflect(patch); // optimistic
+      try {
+        const r = await fetch('/api/state', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(patch)
+        });
+        if (r.status === 401) { location.href = '/login'; return; }
+        if (!r.ok) throw new Error();
+        showToast(okMsg);
+      } catch { showToast('Failed to reach robot'); }
+    }
+
+    grid.addEventListener('click', (e) => {
+      const btn = e.target.closest('.mood');
+      if (btn) post({ mood: btn.dataset.mood }, 'Mood: ' + (byId[btn.dataset.mood]?.label || btn.dataset.mood));
+    });
+    swatches.addEventListener('click', (e) => {
+      const btn = e.target.closest('.swatch');
+      if (btn) post({ color: btn.dataset.color }, 'Color updated');
+    });
+
+    // Live-sync indicators with the robot (in case state changes elsewhere),
+    // using the same event stream the face listens to.
+    const es = new EventSource('/api/events');
+    es.onmessage = (ev) => { try { reflect(JSON.parse(ev.data)); } catch {} };
+    reflect({{ state | tojson }});
+
+    // ------------------------------------------------------------------
+    // Sensor panels. Only wired up when a password exists — without one the
+    // server refuses these endpoints anyway (403 password_required), so the
+    // controls are rendered disabled rather than failing on click.
+    // ------------------------------------------------------------------
+    {% if has_password %}
+    async function api(path, method) {
+      const r = await fetch(path, { method: method || 'GET' });
+      if (r.status === 401) { location.href = '/login'; throw new Error('auth'); }
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.message || body.error || 'request failed');
+      return body;
+    }
+
+    // ---- Camera ----
+    const camToggle = document.getElementById('cam-toggle');
+    const camBody   = document.getElementById('cam-body');
+    const camImg    = document.getElementById('cam-img');
+    const camStatus = document.getElementById('cam-status');
+    const camText   = document.getElementById('cam-status-text');
+    const camHint   = document.getElementById('cam-hint');
+    let camOn = false;
+
+    function camReflect(s) {
+      camOn = !!s.running;
+      camToggle.classList.toggle('on', camOn);
+      camBody.classList.toggle('empty', !camOn);
+      camStatus.classList.toggle('on', camOn);
+      camStatus.classList.toggle('err', !!s.error);
+      camText.textContent = s.error ? 'error' : (camOn ? s.resolution : 'off');
+      if (s.error) camHint.textContent = s.error;
+      else if (camOn) camHint.textContent = s.resolution + ' · target ' + s.fps_target + ' fps · stops itself after 30s unwatched';
+      else camHint.textContent = '';
+
+      // Attach the stream only while on. Leaving the <img> src set would keep
+      // an HTTP connection open and hold the camera awake.
+      if (camOn && !camImg.src) camImg.src = '/camera/stream.mjpg?t=' + Date.now();
+      if (!camOn && camImg.src) { camImg.removeAttribute('src'); }
+    }
+
+    camToggle.addEventListener('click', async () => {
+      camToggle.classList.add('busy');
+      try {
+        camReflect(await api('/api/camera/' + (camOn ? 'stop' : 'start'), 'POST'));
+        showToast(camOn ? 'Camera on' : 'Camera off');
+      } catch (e) { showToast(e.message); }
+      finally { camToggle.classList.remove('busy'); }
+    });
+
+    // The camera can stop on its own (idle timeout, unplugged), so poll while
+    // it is meant to be running rather than trusting the last click.
+    setInterval(async () => {
+      if (!camOn) return;
+      try { camReflect(await api('/api/camera/status')); } catch {}
+    }, 5000);
+
+    // ---- LiDAR ----
+    const lidarToggle = document.getElementById('lidar-toggle');
+    const lidarBody   = document.getElementById('lidar-body');
+    const lidarStatus = document.getElementById('lidar-status');
+    const lidarText   = document.getElementById('lidar-status-text');
+    const rangeInput  = document.getElementById('lidar-range');
+    const rangeLabel  = document.getElementById('lidar-range-label');
+    const view = new LidarView(document.getElementById('lidar-canvas'));
+    let lidarOn = false, scanES = null;
+
+    function lidarReflect(s) {
+      lidarOn = !!s.active;
+      lidarToggle.classList.toggle('on', lidarOn);
+      lidarBody.classList.toggle('empty', !lidarOn);
+      lidarStatus.classList.toggle('on', !!s.scanning);
+      lidarText.textContent = !lidarOn ? 'off'
+        : (s.scanning ? s.scans + ' scans' : 'starting…');
+      if (lidarOn && !scanES) {
+        scanES = new EventSource('/api/lidar/stream');
+        scanES.onmessage = (ev) => { try { view.setScan(JSON.parse(ev.data)); } catch {} };
+      }
+      if (!lidarOn && scanES) { scanES.close(); scanES = null; view.setScan(null); }
+    }
+
+    lidarToggle.addEventListener('click', async () => {
+      lidarToggle.classList.add('busy');
+      try {
+        lidarReflect(await api('/api/lidar/' + (lidarOn ? 'stop' : 'start'), 'POST'));
+        showToast(lidarOn ? 'LiDAR starting…' : 'LiDAR stopped');
+      } catch (e) { showToast(e.message); }
+      finally { lidarToggle.classList.remove('busy'); }
+    });
+
+    rangeInput.addEventListener('input', () => {
+      rangeLabel.textContent = rangeInput.value + ' m';
+      view.setMaxRange(Number(rangeInput.value));
+    });
+
+    // The unit can fail on its own (lidar unplugged), and "active" lags the
+    // first scan by a couple of seconds, so keep polling either way.
+    setInterval(async () => {
+      try { lidarReflect(await api('/api/lidar/status')); } catch {}
+    }, 3000);
+
+    (async () => {
+      try { camReflect(await api('/api/camera/status')); } catch {}
+      try { lidarReflect(await api('/api/lidar/status')); } catch {}
+    })();
+    {% endif %}
+  </script>
+</body>
+</html>

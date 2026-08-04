@@ -1,0 +1,399 @@
+#!/usr/bin/env python3
+"""
+Robot Face — Flask backend.
+
+Serves three things on one port:
+  /            the kiosk "face" (opened full-screen by Firefox on the robot)
+  /control     a password-protected panel to change the mood (opened from a desktop on the LAN)
+  /api/*       state + live event stream that ties the two together
+
+Mood changes made in /control are pushed to every open face over Server-Sent Events,
+so the robot's expression updates instantly with no page refresh.
+"""
+import json
+import os
+import time
+import queue
+import threading
+
+from flask import (
+    Flask, request, jsonify, Response, render_template,
+    redirect, session, url_for,
+)
+from werkzeug.security import check_password_hash
+
+import lidar
+from camera import camera, CameraError
+
+BASE = os.path.dirname(os.path.abspath(__file__))
+STATE_FILE = os.path.join(BASE, "state.json")
+CONFIG_FILE = os.path.join(BASE, "config.json")
+
+# --- Moods -----------------------------------------------------------------
+# These ids map 1:1 to the <robot-face> component's `emotion` attribute, so a
+# mood change is just an attribute swap on the face. "auto" makes the face
+# autonomously cycle expressions (a lively default). The canonical list lives
+# in config.json ("moods"); this is the first-run fallback.
+DEFAULT_MOODS = [
+    {"id": "auto",      "label": "Auto",      "emoji": "🔄"},
+    {"id": "idle",      "label": "Idle",      "emoji": "😐"},
+    {"id": "happy",     "label": "Happy",     "emoji": "😄"},
+    {"id": "curious",   "label": "Curious",   "emoji": "🤨"},
+    {"id": "love",      "label": "Love",      "emoji": "😍"},
+    {"id": "thinking",  "label": "Thinking",  "emoji": "🤔"},
+    {"id": "surprised", "label": "Surprised", "emoji": "😮"},
+    {"id": "sleepy",    "label": "Sleepy",    "emoji": "😴"},
+    {"id": "sad",       "label": "Sad",       "emoji": "😢"},
+    {"id": "angry",     "label": "Angry",     "emoji": "😠"},
+]
+
+# Curated eye colours offered by the design (Look → color).
+DEFAULT_COLORS = ["#FFAE1E", "#FF7A1E", "#FFD34D", "#2AD4FF"]
+
+_state_lock = threading.Lock()
+_sub_lock = threading.Lock()
+_subscribers = set()  # set[queue.Queue]
+
+
+# --- Config / state persistence -------------------------------------------
+def load_config():
+    if os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE) as f:
+            cfg = json.load(f)
+    else:
+        cfg = {}
+    cfg.setdefault("moods", DEFAULT_MOODS)
+    cfg.setdefault("colors", DEFAULT_COLORS)
+    cfg.setdefault("port", 8080)
+    # "gl" = WebGL/SDF renderer (falls back to 2D automatically), "2d" = force 2D.
+    cfg.setdefault("renderer", "gl")
+    # secret_key must be stable so login sessions survive restarts.
+    if not cfg.get("secret_key"):
+        cfg["secret_key"] = os.urandom(24).hex()
+        save_config(cfg)
+    return cfg
+
+
+def save_config(cfg):
+    tmp = CONFIG_FILE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(cfg, f, indent=2)
+    os.replace(tmp, CONFIG_FILE)
+
+
+def load_state():
+    with _state_lock:
+        if os.path.exists(STATE_FILE):
+            try:
+                with open(STATE_FILE) as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, OSError):
+                pass
+        return {"mood": "auto", "color": DEFAULT_COLORS[0], "updated": time.time()}
+
+
+def save_state(state):
+    with _state_lock:
+        tmp = STATE_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(state, f)
+        os.replace(tmp, STATE_FILE)
+
+
+# --- Pub/sub for Server-Sent Events ---------------------------------------
+def broadcast(payload):
+    dead = []
+    with _sub_lock:
+        for q in _subscribers:
+            try:
+                q.put_nowait(payload)
+            except queue.Full:
+                dead.append(q)
+        for q in dead:
+            _subscribers.discard(q)
+
+
+# --- App -------------------------------------------------------------------
+app = Flask(__name__)
+_config = load_config()
+app.secret_key = _config["secret_key"]
+app.permanent_session_lifetime = 60 * 60 * 24 * 30  # 30 days
+
+
+def mood_ids():
+    return {m["id"] for m in load_config()["moods"]}
+
+
+def logged_in():
+    return bool(session.get("auth"))
+
+
+def password_is_set():
+    return bool(load_config().get("password_hash"))
+
+
+def sensor_guard():
+    """Gate for the camera and lidar endpoints.
+
+    Returns a Flask response to abort with, or None to proceed.
+
+    These are held to a HIGHER bar than mood control. With no password the
+    panel auto-authenticates every visitor (see /login), which is a tolerable
+    default for changing a face — and completely unacceptable for a live
+    camera feed of someone's home, or for spinning up hardware. So these
+    endpoints require a password to actually EXIST, not merely a session.
+    """
+    if not logged_in():
+        return jsonify(error="unauthorized"), 401
+    if not password_is_set():
+        return jsonify(
+            error="password_required",
+            message="Set a control-panel password before enabling the camera or "
+                    "lidar: python3 manage.py set-password",
+        ), 403
+    return None
+
+
+# ---- Face (public, kiosk) ----
+@app.route("/")
+def face():
+    return render_template("face.html", state=load_state(), renderer=load_config()["renderer"])
+
+
+@app.route("/api/state")
+def api_state():
+    return jsonify(load_state())
+
+
+@app.route("/api/events")
+def api_events():
+    def stream():
+        q = queue.Queue(maxsize=10)
+        with _sub_lock:
+            _subscribers.add(q)
+        try:
+            # Prime the connection with the current state.
+            yield "data: " + json.dumps(load_state()) + "\n\n"
+            while True:
+                try:
+                    payload = q.get(timeout=20)
+                    yield "data: " + json.dumps(payload) + "\n\n"
+                except queue.Empty:
+                    # Comment line keeps the connection alive through timeouts.
+                    yield ": keepalive\n\n"
+        finally:
+            with _sub_lock:
+                _subscribers.discard(q)
+
+    return Response(
+        stream(),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
+
+
+# ---- Auth ----
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    cfg = load_config()
+    if not cfg.get("password_hash"):
+        # No password configured yet: control panel is open. Warn in the UI.
+        session["auth"] = True
+        session.permanent = True
+        return redirect(url_for("control"))
+    if request.method == "POST":
+        pw = request.form.get("password", "")
+        if check_password_hash(cfg["password_hash"], pw):
+            session["auth"] = True
+            session.permanent = True
+            return redirect(url_for("control"))
+        return render_template("login.html", error="Incorrect password"), 401
+    if logged_in():
+        return redirect(url_for("control"))
+    return render_template("login.html")
+
+
+@app.route("/logout", methods=["POST", "GET"])
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
+
+# ---- Control panel (auth required) ----
+@app.route("/control")
+def control():
+    if not logged_in():
+        return redirect(url_for("login"))
+    cfg = load_config()
+    return render_template(
+        "control.html",
+        moods=cfg["moods"],
+        colors=cfg["colors"],
+        state=load_state(),
+        has_password=bool(cfg.get("password_hash")),
+        camera_present=camera.status()["present"],
+        lidar_installed=lidar.unit_installed(),
+    )
+
+
+@app.route("/api/state", methods=["POST"])
+def api_set_state():
+    """Set the mood and/or eye colour. Body may contain either or both."""
+    if not logged_in():
+        return jsonify(error="unauthorized"), 401
+    data = request.get_json(silent=True) if request.is_json else request.form
+    data = data or {}
+    cfg = load_config()
+    state = load_state()
+
+    if "mood" in data and data["mood"]:
+        if data["mood"] not in mood_ids():
+            return jsonify(error="unknown mood"), 400
+        state["mood"] = data["mood"]
+    if "color" in data and data["color"]:
+        if data["color"] not in cfg["colors"]:
+            return jsonify(error="unknown color"), 400
+        state["color"] = data["color"]
+
+    state["updated"] = time.time()
+    save_state(state)
+    broadcast(state)
+    return jsonify(state)
+
+
+# ---- Camera (auth + password required) ----
+@app.route("/api/camera/status")
+def api_camera_status():
+    guard = sensor_guard()
+    if guard:
+        return guard
+    return jsonify(camera.status())
+
+
+@app.route("/api/camera/<action>", methods=["POST"])
+def api_camera_control(action):
+    guard = sensor_guard()
+    if guard:
+        return guard
+    if action == "start":
+        try:
+            camera.start()
+        except CameraError as exc:
+            return jsonify(error=str(exc)), 503
+    elif action == "stop":
+        camera.stop()
+    else:
+        return jsonify(error="unknown action"), 400
+    return jsonify(camera.status())
+
+
+@app.route("/camera/stream.mjpg")
+def camera_stream():
+    guard = sensor_guard()
+    if guard:
+        return guard
+    try:
+        camera.start()          # idempotent; lets a reload resume the stream
+    except CameraError as exc:
+        return jsonify(error=str(exc)), 503
+
+    boundary = "frame"
+
+    def generate():
+        for jpeg in camera.frames():
+            yield (
+                b"--" + boundary.encode() + b"\r\n"
+                b"Content-Type: image/jpeg\r\n"
+                b"Content-Length: " + str(len(jpeg)).encode() + b"\r\n\r\n"
+                + jpeg + b"\r\n"
+            )
+
+    return Response(
+        generate(),
+        mimetype=f"multipart/x-mixed-replace; boundary={boundary}",
+        headers={"Cache-Control": "no-cache, no-store", "X-Accel-Buffering": "no"},
+    )
+
+
+# ---- LiDAR (auth + password required) ----
+@app.route("/api/lidar/status")
+def api_lidar_status():
+    guard = sensor_guard()
+    if guard:
+        return guard
+    return jsonify(lidar.status())
+
+
+@app.route("/api/lidar/<action>", methods=["POST"])
+def api_lidar_control(action):
+    guard = sensor_guard()
+    if guard:
+        return guard
+    if action == "start":
+        ok, out = lidar.start()
+    elif action == "stop":
+        ok, out = lidar.stop()
+    else:
+        return jsonify(error="unknown action"), 400
+    if not ok:
+        return jsonify(error=out), 503
+    status = lidar.status()
+    status["message"] = out
+    return jsonify(status)
+
+
+@app.route("/api/lidar/ingest", methods=["POST"])
+def api_lidar_ingest():
+    """Receives scans from scan_bridge.py.
+
+    Localhost only, and no session: the bridge is a local ROS process, not a
+    browser. Binding the app to 0.0.0.0 means this check is what keeps the
+    endpoint off the LAN.
+    """
+    if request.remote_addr not in ("127.0.0.1", "::1", "localhost"):
+        return jsonify(error="forbidden"), 403
+    scan = request.get_json(silent=True)
+    if not scan or "ranges" not in scan:
+        return jsonify(error="bad scan"), 400
+    lidar.ingest(scan)
+    return jsonify(ok=True)
+
+
+@app.route("/api/lidar/stream")
+def api_lidar_stream():
+    guard = sensor_guard()
+    if guard:
+        return guard
+    q = lidar.subscribe()
+
+    def stream():
+        latest = lidar.latest()
+        if latest:
+            yield "data: " + json.dumps(latest) + "\n\n"
+        try:
+            while True:
+                try:
+                    yield "data: " + q.get(timeout=15) + "\n\n"
+                except queue.Empty:
+                    yield ": keepalive\n\n"
+        finally:
+            lidar.unsubscribe(q)
+
+    return Response(
+        stream(),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
+
+
+if __name__ == "__main__":
+    cfg = load_config()
+    app.run(host="0.0.0.0", port=cfg["port"], threaded=True)

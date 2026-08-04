@@ -1,0 +1,24 @@
+[Unit]
+Description=RPLIDAR C1 driver + /scan bridge (on demand, started by the control panel)
+Documentation=file:///home/jarvis/gerdoo/logs/004-2026-08-04-rplidar-c1-bringup.md
+
+[Service]
+Type=simple
+ExecStart=%h/robot-face/deploy/run-lidar.sh
+
+# Deliberately NOT Restart=always. The lidar is an on-demand device: if the
+# panel stopped it, it must stay stopped, and a start that fails because the
+# lidar is unplugged should surface as a failure rather than a restart loop.
+Restart=no
+
+# The motor keeps spinning until the driver closes the port, so give it a
+# moment to stop cleanly before SIGKILL.
+TimeoutStopSec=10
+KillSignal=SIGTERM
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=rplidar
+
+# No [Install] section on purpose — this unit must never be enabled at boot.
+# The control panel starts it with `systemctl --user start rplidar.service`.

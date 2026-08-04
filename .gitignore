@@ -1,0 +1,19 @@
+# Build artefacts
+build/
+__pycache__/
+*.pyc
+*.hex
+*.elf
+
+# Device-specific runtime state — NEVER commit.
+# config.json holds the Flask secret_key and the control-panel password hash;
+# state.json is the live mood, rewritten constantly.
+robot-face/config.json
+robot-face/state.json
+
+# Serial capture / scratch
+screenlog.*
+EOF
+
+# macOS
+.DS_Store

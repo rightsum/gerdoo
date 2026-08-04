@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+# Runtime files (device-specific: contains password hash, secret key, live mood)
+config.json
+state.json

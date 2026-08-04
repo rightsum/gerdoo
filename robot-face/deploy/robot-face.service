@@ -1,0 +1,14 @@
+[Unit]
+Description=Robot Face — kiosk face + LAN mood control panel
+
+[Service]
+Type=simple
+WorkingDirectory=/home/jarvis/robot-face
+ExecStart=/usr/bin/python3 /home/jarvis/robot-face/app.py
+Restart=on-failure
+RestartSec=3
+
+# Installed as a *user* service (systemctl --user) so it needs no root. With
+# gdm autologin, the jarvis session — and this service — start on boot.
+[Install]
+WantedBy=default.target

@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Robot Face · WebGL demo</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; background: #070503; overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    #stage { position: fixed; inset: 0; }
+    robot-face { position: absolute; inset: 0; }
+
+    .bar { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
+      display: flex; align-items: center; gap: 16px; flex-wrap: wrap; justify-content: center;
+      max-width: 94vw; padding: 12px 16px; z-index: 5;
+      background: rgba(20,24,36,0.7); backdrop-filter: blur(10px);
+      border: 1px solid rgba(255,255,255,0.09); border-radius: 16px;
+      box-shadow: 0 16px 50px rgba(0,0,0,0.55); }
+    .group { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    button.emo { padding: 8px 13px; font-size: 13px; font-weight: 500; color: #dbe2f2;
+      background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 999px; cursor: pointer; transition: all .12s; }
+    button.emo:hover { background: rgba(255,255,255,0.1); }
+    button.emo.on { background: #4f7dff; border-color: #4f7dff; color: #fff; }
+    .sep { width: 1px; height: 26px; background: rgba(255,255,255,0.12); }
+    .sw { width: 30px; height: 30px; border-radius: 50%; cursor: pointer; padding: 0;
+      background: var(--c); border: 2px solid rgba(255,255,255,0.15); box-shadow: 0 0 14px -2px var(--c); }
+    .sw.on { border-color: #fff; }
+    label { font-size: 12px; color: #93a0bd; display: flex; align-items: center; gap: 8px; }
+    input[type=range] { accent-color: #4f7dff; }
+    .hint { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 5;
+      font-size: 12px; color: #6b7690; letter-spacing: .3px; }
+  </style>
+</head>
+<body>
+  <div class="hint">Robot Face — WebGL renderer (running locally on your Mac's GPU)</div>
+  <div id="stage">
+    <robot-face color="#FFAE1E" emotion="auto" speed="1"></robot-face>
+  </div>
+
+  <div class="bar">
+    <div class="group" id="emos"></div>
+    <div class="sep"></div>
+    <div class="group" id="cols"></div>
+    <div class="sep"></div>
+    <label>speed <input id="speed" type="range" min="0.5" max="2" step="0.1" value="1"></label>
+  </div>
+
+  <script src="static/robot-face-gl.js"></script>
+  <script>
+    const face = document.querySelector('robot-face');
+    const EMOS = ['auto','idle','happy','curious','love','thinking','surprised','sleepy','sad','angry'];
+    const COLS = ['#FFAE1E','#FF7A1E','#FFD34D','#2AD4FF'];
+    const emos = document.getElementById('emos');
+    const cols = document.getElementById('cols');
+
+    EMOS.forEach(e => {
+      const b = document.createElement('button');
+      b.className = 'emo'; b.textContent = e; b.dataset.emo = e;
+      if (e === 'auto') b.classList.add('on');
+      b.onclick = () => {
+        face.setAttribute('emotion', e);
+        emos.querySelectorAll('.emo').forEach(x => x.classList.toggle('on', x === b));
+      };
+      emos.appendChild(b);
+    });
+    COLS.forEach((c, i) => {
+      const b = document.createElement('button');
+      b.className = 'sw' + (i === 0 ? ' on' : ''); b.style.setProperty('--c', c);
+      b.onclick = () => {
+        face.setAttribute('color', c);
+        cols.querySelectorAll('.sw').forEach(x => x.classList.toggle('on', x === b));
+      };
+      cols.appendChild(b);
+    });
+    document.getElementById('speed').oninput = (e) => face.setAttribute('speed', e.target.value);
+  </script>
+</body>
+</html>

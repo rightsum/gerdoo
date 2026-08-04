@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Robot Face (kiosk)
+Comment=Open the robot face full-screen in Firefox kiosk mode, GPU-accelerated
+# Wait for the graphical session + robot-face service, then launch Firefox locked
+# to the local face page, using the hardened GPU kiosk profile.
+#   MOZ_USE_XINPUT2 -> touchscreen; MOZ_X11_EGL/MOZ_WEBRENDER -> force GPU on Tegra
+Exec=/bin/bash -c "sleep 8 && DISPLAY=:0 MOZ_USE_XINPUT2=1 MOZ_X11_EGL=1 MOZ_WEBRENDER=1 firefox --profile /home/jarvis/.robotface-ff --kiosk http://localhost:8080/"
+X-GNOME-Autostart-enabled=true
+X-XFCE-Autostart-enabled=true
+Hidden=false
+NoDisplay=false

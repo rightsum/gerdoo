@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Robot Face</title>
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; width: 100%;
+      background: #070503; overflow: hidden; }
+    /* Kiosk: no cursor, no text selection, no touch callouts. */
+    * { cursor: none; -webkit-user-select: none; user-select: none;
+      -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
+    #face { position: fixed; inset: 0; }
+    robot-face { position: absolute; inset: 0; }
+  </style>
+</head>
+<body>
+  <div id="face">
+    <robot-face
+      color="{{ state.color or '#FFAE1E' }}"
+      emotion="{{ state.mood or 'auto' }}"
+      speed="1"></robot-face>
+  </div>
+
+  {% if renderer == '2d' %}
+  <script src="{{ url_for('static', filename='robot-face.js') }}"></script>
+  {% else %}
+  <script src="{{ url_for('static', filename='robot-face-gl.js') }}"></script>
+  {% endif %}
+  <script>
+    const face = document.querySelector('robot-face');
+
+    function apply(state) {
+      if (!state) return;
+      if (state.mood)  face.setAttribute('emotion', state.mood);
+      if (state.color) face.setAttribute('color', state.color);
+    }
+
+    // Live updates via Server-Sent Events, with automatic reconnect if the
+    // backend restarts or the network blips.
+    let es;
+    function connect() {
+      es = new EventSource('/api/events');
+      es.onmessage = (ev) => { try { apply(JSON.parse(ev.data)); } catch {} };
+      es.onerror = () => { es.close(); setTimeout(connect, 2000); };
+    }
+    connect();
+
+    // Belt-and-suspenders: if the stream is ever silent, poll occasionally.
+    setInterval(async () => {
+      try { apply(await (await fetch('/api/state', { cache: 'no-store' })).json()); }
+      catch {}
+    }, 30000);
+  </script>
+</body>
+</html>
