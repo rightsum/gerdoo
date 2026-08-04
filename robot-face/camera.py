@@ -20,12 +20,35 @@ import cv2
 # not capture).
 DEFAULT_DEVICE = "/dev/v4l/by-id/usb-046d_Brio_500_2437ZBD0PNK8-video-index0"
 
-# 720p15 is a deliberate compromise: the Brio does 1080p30, but every frame is
-# JPEG-encoded on the CPU here, and the panel is a monitoring view, not a
-# recording. Raise only if you have measured the Jetson can afford it.
-DEFAULT_WIDTH = 1280
-DEFAULT_HEIGHT = 720
-DEFAULT_FPS = 15
+# The camera already produces MJPEG and the browser wants MJPEG, so frames are
+# passed through untouched — no decode, no re-encode. Measured on this Jetson:
+#
+#   decode+encode  720p   15.0 fps   40.5% CPU
+#   decode+encode 1080p   24.9 fps   89.3% CPU
+#   passthrough    720p   25.0 fps    0.5% CPU
+#   passthrough   1080p   25.0 fps    0.6% CPU
+#
+# ~150x cheaper, higher frame rate, and no generation loss from re-encoding.
+#
+# With CPU no longer the limit, the constraint moved to the NETWORK:
+#
+#    720p  ~2.6 MB/s  = ~21 Mbps per viewer
+#   1080p  ~5.6 MB/s  = ~45 Mbps per viewer
+#
+# The Jetson's wifi is 2.4 GHz and measured ~78 Mbit/s rx, so 1080p would eat
+# most of the link and degrade everything else on it. 720p30 is the default for
+# that reason alone — not CPU. Once wifi moves to 5 GHz (ACTION-PLAN A3),
+# 1080p becomes reasonable:
+#
+#   ROBOT_CAMERA_WIDTH=1920 ROBOT_CAMERA_HEIGHT=1080
+#
+# The camera tops out at ~25 fps in MJPEG at both resolutions regardless of the
+# 30 requested — that is the Brio, not this code.
+DEFAULT_WIDTH = int(os.environ.get("ROBOT_CAMERA_WIDTH", "1280"))
+DEFAULT_HEIGHT = int(os.environ.get("ROBOT_CAMERA_HEIGHT", "720"))
+DEFAULT_FPS = int(os.environ.get("ROBOT_CAMERA_FPS", "30"))
+
+# Only used if passthrough is unavailable and frames must be re-encoded.
 JPEG_QUALITY = 80
 
 # Auto-release if no viewer has taken a frame in this long.
@@ -50,6 +73,8 @@ class Camera:
         self._last_read = 0.0       # when a viewer last took a frame
         self._frames = 0
         self._error = None
+        self._mode = None           # "passthrough" or "encode", set by the grabber
+        self._bytes = 0
         self._new_frame = threading.Condition(self._lock)
 
     # -- lifecycle ---------------------------------------------------------
@@ -78,6 +103,9 @@ class Camera:
             # Smallest buffer we can ask for: the panel wants the newest frame,
             # not a backlog of stale ones.
             cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            # Hand back the camera's own MJPEG bytes instead of decoding to
+            # BGR. This is what makes passthrough possible.
+            cap.set(cv2.CAP_PROP_CONVERT_RGB, 0)
 
             self._cap = cap
             self._running = True
@@ -102,6 +130,12 @@ class Camera:
             self._thread = None
 
     # -- grabber -----------------------------------------------------------
+    @staticmethod
+    def _is_jpeg(buf):
+        # A complete JPEG starts FF D8 FF and ends FF D9. V4L2 MJPEG frames are
+        # whole JPEGs, so they can go straight to the browser.
+        return len(buf) > 4 and buf[0] == 0xFF and buf[1] == 0xD8 and buf[2] == 0xFF
+
     def _grab_loop(self):
         encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), JPEG_QUALITY]
         consecutive_failures = 0
@@ -133,13 +167,28 @@ class Camera:
                 continue
             consecutive_failures = 0
 
-            ok, buf = cv2.imencode(".jpg", frame, encode_params)
-            if not ok:
-                continue
+            raw = frame.tobytes()
+            if self._is_jpeg(raw):
+                # Passthrough — the camera's own JPEG, untouched.
+                jpeg = raw
+                mode = "passthrough"
+            else:
+                # CONVERT_RGB=0 was ignored (older OpenCV, or a camera with no
+                # MJPEG mode), so we got a decoded BGR array and have to encode
+                # it. Correct, just far more expensive.
+                ok, buf = cv2.imencode(".jpg", frame, encode_params)
+                if not ok:
+                    continue
+                jpeg = buf.tobytes()
+                mode = "encode"
+
             with self._lock:
-                self._frame = buf.tobytes()
+                self._mode = mode
+                self._frame = jpeg
                 self._frame_at = time.time()
                 self._frames += 1
+                # Rough per-second byte rate, for the status line.
+                self._bytes = len(jpeg) * self.fps
                 self._new_frame.notify_all()
 
         # Released here so the device is free the moment the loop exits, even
@@ -179,6 +228,8 @@ class Camera:
                 "resolution": f"{self.width}x{self.height}",
                 "fps_target": self.fps,
                 "frames": self._frames,
+                "mode": self._mode,
+                "kbps": round(self._bytes * 8 / 1024) if self._bytes else None,
                 "error": self._error,
                 "present": os.path.exists(self.device),
             }

@@ -87,6 +87,30 @@
     .rangebar input { flex: 1; accent-color: #5b8cff; }
     .locked { padding: 14px 16px; font-size: 13px; color: #ffe0a3;
       background: rgba(255,180,0,0.08); border-top: 1px solid rgba(255,180,0,0.2); }
+    .gesture-badge { position: absolute; left: 12px; top: 12px; display: none;
+      align-items: center; gap: 9px; padding: 8px 14px 8px 11px; border-radius: 12px;
+      background: rgba(7,13,28,0.82); border: 1px solid rgba(255,255,255,0.14);
+      backdrop-filter: blur(6px); font-size: 14px; font-weight: 600; color: #e8ecf6; }
+    .gesture-badge.show { display: flex; }
+    .gesture-badge.fist { border-color: #37d67a; box-shadow: 0 0 0 1px #37d67a inset, 0 0 22px -4px #37d67a; }
+    .gesture-badge #gesture-emoji { font-size: 22px; line-height: 1; }
+    /* Tracking reticle — position comes from the hand landmarks, so it shows
+       exactly what a neck-tracking loop would be aiming at. */
+    .reticle { position: absolute; width: 62px; height: 62px; margin: -31px 0 0 -31px;
+      border: 2px solid #37d67a; border-radius: 50%; display: none; pointer-events: none;
+      box-shadow: 0 0 16px -2px #37d67a, 0 0 0 1px rgba(0,0,0,.4) inset;
+      transition: left .09s linear, top .09s linear; }
+    .reticle.show { display: block; }
+    .reticle::before, .reticle::after { content: ''; position: absolute; background: #37d67a; }
+    .reticle::before { left: 50%; top: -9px; width: 1px; height: 12px; }
+    .reticle::after { top: 50%; left: -9px; height: 1px; width: 12px; }
+    .reticle.tracking-fist { border-color: #ffd34d; box-shadow: 0 0 20px -2px #ffd34d; }
+    .reticle.tracking-fist::before, .reticle.tracking-fist::after { background: #ffd34d; }
+    .track-readout { position: absolute; right: 12px; bottom: 12px; display: none;
+      font-family: ui-monospace, monospace; font-size: 11px; color: #9fb3d9;
+      background: rgba(7,13,28,0.8); padding: 6px 10px; border-radius: 8px;
+      border: 1px solid rgba(255,255,255,0.1); line-height: 1.5; }
+    .track-readout.show { display: block; }
   </style>
 </head>
 <body>
@@ -133,8 +157,23 @@
       </div>
       {% if has_password %}
       <div class="panel-body empty" id="cam-body">
-        <div class="stage" id="cam-stage"><img id="cam-img" alt="Camera stream"></div>
+        <div class="stage" id="cam-stage">
+          <img id="cam-img" alt="Camera stream">
+          <div class="gesture-badge" id="gesture-badge"><span id="gesture-emoji">✊</span><span id="gesture-name"></span></div>
+          <div class="reticle" id="reticle"></div>
+          <div class="track-readout" id="track-readout"></div>
+        </div>
         <p class="hint" id="cam-hint"></p>
+        <div class="rangebar" style="margin-top:14px">
+          <span>Gesture detection</span>
+          <span style="flex:1"></span>
+          <span class="status" id="gesture-status"><span class="led"></span><span id="gesture-status-text">off</span></span>
+          <button class="toggle" id="gesture-toggle" aria-label="Toggle gesture detection"
+                  {% if not gesture_installed %}disabled{% endif %}></button>
+        </div>
+        {% if not gesture_installed %}
+        <p class="hint">Gesture unit not installed — run <code>./deploy/deploy.sh</code></p>
+        {% endif %}
       </div>
       {% if not camera_present %}
       <div class="locked">Camera not detected. Plug in the Brio 500 and reload — <code>ls /dev/v4l/by-id/</code></div>
@@ -337,9 +376,89 @@
       try { lidarReflect(await api('/api/lidar/status')); } catch {}
     }, 3000);
 
+    // ---- Gesture detection ----
+    const gToggle = document.getElementById('gesture-toggle');
+    const gStatus = document.getElementById('gesture-status');
+    const gText   = document.getElementById('gesture-status-text');
+    const gBadge  = document.getElementById('gesture-badge');
+    const gEmoji  = document.getElementById('gesture-emoji');
+    const gName   = document.getElementById('gesture-name');
+    let gOn = false, gES = null;
+
+    const GESTURE_EMOJI = {
+      Closed_Fist: '✊', Open_Palm: '✋', Pointing_Up: '☝️', Thumb_Up: '👍',
+      Thumb_Down: '👎', Victory: '✌️', ILoveYou: '🤟',
+    };
+
+    const reticle  = document.getElementById('reticle');
+    const readout  = document.getElementById('track-readout');
+
+    function showGesture(d) {
+      // --- classification badge ---
+      if (!d || !d.gesture) {
+        gBadge.classList.remove('show', 'fist');
+      } else {
+        gEmoji.textContent = GESTURE_EMOJI[d.gesture] || '👋';
+        gName.textContent = d.gesture.replace(/_/g, ' ')
+          + (d.score ? '  ' + Math.round(d.score * 100) + '%' : '');
+        gBadge.classList.add('show');
+        gBadge.classList.toggle('fist', !!d.is_fist);
+      }
+
+      // --- tracking reticle ---
+      // Position is published every frame, independently of the gesture label,
+      // so the reticle keeps following a hand whose gesture is unrecognised.
+      const p = d && d.pos;
+      if (!p) {
+        reticle.classList.remove('show');
+        readout.classList.remove('show');
+        return;
+      }
+      reticle.style.left = (p.x * 100) + '%';
+      reticle.style.top  = (p.y * 100) + '%';
+      reticle.classList.add('show');
+      reticle.classList.toggle('tracking-fist', !!(d && d.is_fist));
+      // err_x/err_y are what a pan/tilt controller consumes directly.
+      readout.innerHTML =
+        'x ' + p.x.toFixed(3) + '  y ' + p.y.toFixed(3) + '<br>' +
+        'err ' + (p.err_x >= 0 ? '+' : '') + p.err_x.toFixed(3) +
+        ' , ' + (p.err_y >= 0 ? '+' : '') + p.err_y.toFixed(3) + '<br>' +
+        'size ' + p.size.toFixed(3);
+      readout.classList.add('show');
+    }
+
+    function gReflect(s) {
+      gOn = !!s.active;
+      gToggle.classList.toggle('on', gOn);
+      gStatus.classList.toggle('on', gOn && s.last_age !== null);
+      gText.textContent = gOn ? (s.detections + ' det') : 'off';
+      if (gOn && !gES) {
+        gES = new EventSource('/api/gesture/stream');
+        gES.onmessage = (ev) => { try { showGesture(JSON.parse(ev.data)); } catch {} };
+      }
+      if (!gOn && gES) { gES.close(); gES = null; showGesture(null); }
+      if (gOn) showGesture(s.current);
+    }
+
+    gToggle.addEventListener('click', async () => {
+      gToggle.classList.add('busy');
+      try {
+        gReflect(await api('/api/gesture/' + (gOn ? 'stop' : 'start'), 'POST'));
+        // Starting gestures also starts the camera, so refresh that too.
+        camReflect(await api('/api/camera/status'));
+        showToast(gOn ? 'Gesture detection on' : 'Gesture detection off');
+      } catch (e) { showToast(e.message); }
+      finally { gToggle.classList.remove('busy'); }
+    });
+
+    setInterval(async () => {
+      try { gReflect(await api('/api/gesture/status')); } catch {}
+    }, 4000);
+
     (async () => {
       try { camReflect(await api('/api/camera/status')); } catch {}
       try { lidarReflect(await api('/api/lidar/status')); } catch {}
+      try { gReflect(await api('/api/gesture/status')); } catch {}
     })();
     {% endif %}
   </script>

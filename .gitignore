@@ -17,3 +17,6 @@ EOF
 
 # macOS
 .DS_Store
+
+# ML model weights — 8 MB, downloaded on the robot, not source
+robot-face/models/

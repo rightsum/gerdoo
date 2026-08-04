@@ -22,8 +22,18 @@ from flask import (
 )
 from werkzeug.security import check_password_hash
 
+import gesture
 import lidar
 from camera import camera, CameraError
+
+
+def local_only():
+    """True if the request came from this machine.
+
+    The app binds 0.0.0.0, so this is the only thing keeping the internal
+    ingest/frame endpoints off the LAN.
+    """
+    return request.remote_addr in ("127.0.0.1", "::1", "localhost")
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 STATE_FILE = os.path.join(BASE, "state.json")
@@ -237,6 +247,7 @@ def control():
         has_password=bool(cfg.get("password_hash")),
         camera_present=camera.status()["present"],
         lidar_installed=lidar.unit_installed(),
+        gesture_installed=gesture.unit_installed(),
     )
 
 
@@ -351,10 +362,9 @@ def api_lidar_ingest():
     """Receives scans from scan_bridge.py.
 
     Localhost only, and no session: the bridge is a local ROS process, not a
-    browser. Binding the app to 0.0.0.0 means this check is what keeps the
-    endpoint off the LAN.
+    browser.
     """
-    if request.remote_addr not in ("127.0.0.1", "::1", "localhost"):
+    if not local_only():
         return jsonify(error="forbidden"), 403
     scan = request.get_json(silent=True)
     if not scan or "ranges" not in scan:
@@ -391,6 +401,95 @@ def api_lidar_stream():
             "X-Accel-Buffering": "no",
             "Connection": "keep-alive",
         },
+    )
+
+
+# ---- Gesture detection (auth + password required) ----
+@app.route("/api/camera/frame.jpg")
+def api_camera_frame():
+    """Single latest frame, for the local gesture detector.
+
+    Localhost only. V4L2 allows one reader and this process owns the camera,
+    so the detector cannot open the device itself — it gets frames from here.
+    Reading also refreshes the camera's idle timer, so detection keeps the
+    camera alive exactly as a browser viewer would.
+    """
+    if not local_only():
+        return jsonify(error="forbidden"), 403
+    for frame in camera.frames():          # yields as soon as one is ready
+        return Response(frame, mimetype="image/jpeg",
+                        headers={"Cache-Control": "no-store"})
+    return jsonify(error="camera not running"), 503
+
+
+@app.route("/api/gesture/status")
+def api_gesture_status():
+    guard = sensor_guard()
+    if guard:
+        return guard
+    return jsonify(gesture.status())
+
+
+@app.route("/api/gesture/<action>", methods=["POST"])
+def api_gesture_control(action):
+    guard = sensor_guard()
+    if guard:
+        return guard
+    if action == "start":
+        # Detection is meaningless without frames, so bring the camera up too
+        # rather than leaving the detector polling a dead endpoint.
+        try:
+            camera.start()
+        except CameraError as exc:
+            return jsonify(error=str(exc)), 503
+        ok, out = gesture.start()
+    elif action == "stop":
+        ok, out = gesture.stop()          # camera left alone; it may be in use
+    else:
+        return jsonify(error="unknown action"), 400
+    if not ok:
+        return jsonify(error=out), 503
+    status = gesture.status()
+    status["message"] = out
+    return jsonify(status)
+
+
+@app.route("/api/gesture/ingest", methods=["POST"])
+def api_gesture_ingest():
+    if not local_only():
+        return jsonify(error="forbidden"), 403
+    det = request.get_json(silent=True)
+    if det is None or "gesture" not in det:
+        return jsonify(error="bad detection"), 400
+    gesture.ingest(det)
+    return jsonify(ok=True)
+
+
+@app.route("/api/gesture/stream")
+def api_gesture_stream():
+    guard = sensor_guard()
+    if guard:
+        return guard
+    q = gesture.subscribe()
+
+    def stream():
+        cur = gesture.latest()
+        if cur:
+            yield "data: " + json.dumps(cur) + "\n\n"
+        try:
+            while True:
+                try:
+                    yield "data: " + q.get(timeout=15) + "\n\n"
+                except queue.Empty:
+                    yield ": keepalive\n\n"
+        finally:
+            gesture.unsubscribe(q)
+
+    return Response(
+        stream(),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no",
+                 "Connection": "keep-alive"},
     )
 
 

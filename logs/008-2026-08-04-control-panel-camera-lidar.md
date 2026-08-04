@@ -96,9 +96,44 @@ Three details that matter:
 - **Stable device path.** `/dev/v4l/by-id/usb-046d_Brio_500_2437ZBD0PNK8-video-index0`. `/dev/video0` moves, and the Brio claims **two** nodes — `index1` is metadata, not capture.
 - **Auto-release after 30 s unwatched.** A closed browser tab must not leave a webcam running in someone's home. The grabber loop tracks when a viewer last took a frame and shuts itself down.
 
-Measured: **91 JPEG frames in 6 s ≈ 15 fps** at 1280×720, exactly the target.
+### ⚠️ First version transcoded for nothing — fixed same day
 
-720p15 is deliberate. The Brio does 1080p30, but every frame is JPEG-encoded on the CPU here and this is a monitoring view, not a recording.
+The initial pipeline ran at **720p15 for ~40% CPU**, which I rationalised as "JPEG encoding is expensive, and this is a monitoring view."
+
+That was wrong. The Brio outputs **MJPEG**, the browser wants **MJPEG** — and in between, OpenCV was decoding every frame to BGR and `imencode`-ing it straight back to JPEG. Same format in, same format out, with a full decode+encode round trip and a generation of quality loss for nothing.
+
+`cv2.CAP_PROP_CONVERT_RGB = 0` hands back the camera's own JPEG bytes untouched. Verified they are complete standalone JPEGs — SOI at byte 0, EOI at the final two bytes, **zero** trailing bytes — so they can go straight to the browser.
+
+Benchmarked on this Jetson:
+
+| Mode | Resolution | fps | CPU |
+|---|---|---|---|
+| decode + encode | 720p | 15.0 | **40.5 %** |
+| decode + encode | 720p | 25.0 | 55.9 % |
+| decode + encode | 1080p | 24.9 | **89.3 %** |
+| **passthrough** | **720p** | **25.0** | **0.5 %** |
+| **passthrough** | **1080p** | **25.0** | **0.6 %** |
+
+Deployed and measured live: **25.2 fps, 1.9 % CPU for the whole Flask service**, `mode: passthrough` — against 15 fps and ~40 % before. Higher frame rate, ~20× less CPU, and the camera's original quality instead of a re-encode at q80.
+
+### The constraint moved to the network
+
+With CPU no longer limiting, bandwidth became the reason not to raise resolution:
+
+```
+ 720p  ~25 Mbps per viewer
+1080p  ~45 Mbps per viewer
+```
+
+The Jetson's wifi is 2.4 GHz with a measured ~78 Mbit/s rx rate ([log 001](001-2026-08-04-jetson-wifi-unreachable.md)), so 1080p would eat most of the link and degrade SSH and ROS traffic alongside it. **720p30 is the default for network reasons, not CPU.** One env var away once wifi moves to 5 GHz (**A3**, which this makes more valuable):
+
+```
+ROBOT_CAMERA_WIDTH=1920 ROBOT_CAMERA_HEIGHT=1080
+```
+
+**25 fps is the Brio's MJPEG ceiling**, not a limit in this code — it returns 25.0 at both resolutions regardless of requesting 30.
+
+The encode path is kept as a fallback: if `CONVERT_RGB=0` is ignored (older OpenCV, or a camera with no MJPEG mode) the grabber detects a non-JPEG buffer and encodes it. `status` reports which mode is live.
 
 ## LiDAR unit — on demand, never at boot
 
@@ -136,7 +171,8 @@ var py = cy - d * Math.cos(a) * scale;   // canvas y down,  ROS x forward
 | Check | Result |
 |---|---|
 | Camera start | `running: true`, device present |
-| Camera stream | **91 frames / 6 s ≈ 15 fps**, 9.06 MB |
+| Camera stream | **151 frames / 6 s = 25.2 fps**, `mode: passthrough`, 25.1 Mbps |
+| Camera CPU | **1.9 %** of one core for the whole Flask service while streaming |
 | Camera stop | releases device, subsequent status 401 without session |
 | LiDAR start via panel | `active: true` |
 | LiDAR scanning | **43 scans in 15 s**, `last_scan_age 0.09 s` |
@@ -179,6 +215,8 @@ var py = cy - d * Math.cos(a) * scale;   // canvas y down,  ROS x forward
 4. **`BEST_EFFORT` QoS or nothing appears** — and there is no error to tell you why.
 5. **`static` units are the right shape for on-demand hardware.** No `[Install]` means it cannot accidentally be enabled at boot.
 6. **Anything that turns on a camera needs an idle timeout.** A closed tab is not consent to keep filming.
+7. **If the format going in matches the format going out, do not touch the bytes.** A decode+encode round trip cost 20× the CPU, a third of the frame rate, and a generation of quality — and it was invisible until measured. "Encoding is expensive so lower the fps" was a rationalisation, not a diagnosis.
+8. **When one bottleneck falls, find the next one before raising limits.** CPU stopped mattering and bandwidth immediately did; 1080p is a wifi decision now, not a compute one.
 
 ## Related
 
