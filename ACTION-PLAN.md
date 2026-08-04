@@ -151,6 +151,23 @@ Measured: RTT **0.2 ms** · loop **7.06 MHz** · restart **`power_on`** · heart
 | **F7** | Custom messages | 2026-08-14 Fri | `Int32`/`Float32` cannot carry encoder ticks, battery volts, motor state |
 | **F8** | Decide the `ros2_control` boundary | 2026-08-14 Fri | micro-ROS suits lights/weather/servo goals; the drive loop likely wants a `hardware_interface` over its own protocol |
 
+---
+
+## G — Vision
+
+| # | Task | Status |
+|---|---|---|
+| **G1** | Hand gesture detection (`Closed_Fist` + 6 others) | ✅ **Done 2026-08-04.** MediaPipe on CPU, 4 Hz, 57 % of one core of six, on demand. [Log 010](logs/010-2026-08-04-gesture-detection-and-gpu-evaluation.md) |
+| **G2** | Hand position tracking | ✅ **Done.** `err_x`/`err_y` from frame centre — exactly what a pan/tilt loop consumes. Panel shows a live reticle |
+
+| # | Task | Trigger | Pass condition |
+|---|---|---|---|
+| **G3** | ⏸️ **Port vision to TensorRT** | **when neck tracking is built, or when the OV9281 pair arrives** — not before | **Proven viable, not built.** Engines built and benchmarked on this board: palm **2.83 ms**, landmarks **1.41 ms**, combined **≈4.2 ms vs 120 ms on CPU (~28×)**. Everything needed to resume — model URLs (LFS endpoint), `trtexec` commands, tensor shapes, reference pre/post-processing — is in [log 010](logs/010-2026-08-04-gesture-detection-and-gpu-evaluation.md) |
+| **G4** | Neck tracking loop | after **D** (neck wired) | Current lag is **~300–400 ms** (120 ms inference + 250 ms sample interval). Fine for detection, **too slow for tracking**. Try `GESTURE_HZ` up and a P-controller with deadzone on the Teensy before committing to G3 |
+| **G5** | Face / eye tracking | on request | Same pipeline, swap in MediaPipe `FaceLandmarker`. Faces move slowly — **4 Hz is adequate, no GPU work needed** |
+
+> ⚠️ **MediaPipe cannot use the GPU on this board.** The prebuilt aarch64 wheel is compiled without GPU support; [mediapipe#5690](https://github.com/google-ai-edge/mediapipe/issues/5690) is open since Oct 2024 and NVIDIA state Jetson is not officially supported. Community CUDA wheels are JetPack 4.6 era. TensorRT is the only GPU route.
+
 > ⚠️ **`platform.txt` is patched in `~/.arduino15`** to link precompiled libs. **Any Teensy core reinstall or update silently reverts it** — symptom is a wall of `undefined reference` at link. Backup: `platform.txt.orig`.
 
 **Memory cost:** FLASH 13 KB → **264 KB** (7.78 MB free), RAM1 312 KB free, loop 7.06 → 4.36 MHz.
