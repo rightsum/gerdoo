@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=RotateDisplayAndTouch
+Comment=Rotate the 5.5" panel to landscape and apply the matching touch calibration
+Exec=/bin/bash -c 'sleep 3; $HOME/robot-face/deploy/rotate-display.sh >> /tmp/rotate-display.log 2>&1'
+Hidden=false
+NoDisplay=false
+X-GNOME-Autostart-enabled=true

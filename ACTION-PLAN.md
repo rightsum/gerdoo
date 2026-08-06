@@ -165,6 +165,34 @@ Measured: RTT **0.2 ms** · loop **7.06 MHz** · restart **`power_on`** · heart
 | **G3** | ⏸️ **Port vision to TensorRT** | **when neck tracking is built, or when the OV9281 pair arrives** — not before | **Proven viable, not built.** Engines built and benchmarked on this board: palm **2.83 ms**, landmarks **1.41 ms**, combined **≈4.2 ms vs 120 ms on CPU (~28×)**. Everything needed to resume — model URLs (LFS endpoint), `trtexec` commands, tensor shapes, reference pre/post-processing — is in [log 010](logs/010-2026-08-04-gesture-detection-and-gpu-evaluation.md) |
 | **G4** | Neck tracking loop | after **D** (neck wired) | Current lag is **~300–400 ms** (120 ms inference + 250 ms sample interval). Fine for detection, **too slow for tracking**. Try `GESTURE_HZ` up and a P-controller with deadzone on the Teensy before committing to G3 |
 | **G5** | Face / eye tracking | on request | Same pipeline, swap in MediaPipe `FaceLandmarker`. Faces move slowly — **4 Hz is adequate, no GPU work needed** |
+| **G6** | 🔬 **Semantic layer — evaluate [NVIDIA LocateAnything](https://research.nvidia.com/labs/lpr/locate-anything/)** | when the robot needs open-vocabulary queries ("find the blue cup"), **not** for tracking | Candidate, not committed — see below |
+
+### The two-layer split for vision
+
+Same principle as the Teensy/Jetson split in [log 002](logs/002-2026-08-04-usb-topology-and-peripheral-split.md) — **determinism at the bottom, intelligence at the top.** A VLM in a servo loop is the same category error as a lidar on a microcontroller.
+
+| Layer | Job | Vocabulary | Budget | Tool |
+|---|---|---|---|---|
+| **Reflex** | fist tracking, neck servos, obstacle avoidance | fixed | **milliseconds**, continuous | small specialised models — MediaPipe now, TensorRT at **4.2 ms** (G3) |
+| **Semantic** | "pick up the blue cup", "is the door open?" | open-ended | **seconds**, on demand | VLM — LocateAnything candidate (G6) |
+
+#### G6 — LocateAnything assessment
+
+| | |
+|---|---|
+| What | Vision-language model for grounding/detection. Moon-ViT encoder + Qwen2.5 decoder, **3B params**. Give it language, get boxes |
+| Innovation | Parallel Box Decoding — whole box in one step, not token-by-token |
+| Published speed | **12.7 boxes/sec on an H100** |
+| **Estimated on Orin Nano** | **~1–2 s per query** — ⚠️ *scaled from H100, NOT measured.* The Orin is ~15–60× less compute with 8 GB shared vs 80 GB HBM |
+| Memory | ~3 GB at INT8, ~6 GB at FP16, against **8 GB shared** with the face kiosk, ROS 2, lidar and camera all live |
+| Feasibility | Plausible — `inventory.md` already records this board running Llama 3.1 8B @ 19 tok/s and VLMs (Qwen2 VL, VILA). **3B fits; the question is rate, not capacity** |
+
+**Explicitly not a tracking solution.** ~1–2 s against 4.2 ms for the TensorRT hand pipeline is ~300× off, for a loop where 300 ms already felt laggy. **G6 does not affect or replace G3/G4.**
+
+Check before committing any time to it:
+1. **Licence** — NVIDIA research releases are often non-commercial. Fine for a personal robot, worth knowing
+2. **INT8 / TensorRT-LLM quantisation on Jetson** — FP16 at 6 GB leaves no room for anything else
+3. **Real Orin throughput** — the estimate above is scaled across different architectures, which is unreliable
 
 > ⚠️ **MediaPipe cannot use the GPU on this board.** The prebuilt aarch64 wheel is compiled without GPU support; [mediapipe#5690](https://github.com/google-ai-edge/mediapipe/issues/5690) is open since Oct 2024 and NVIDIA state Jetson is not officially supported. Community CUDA wheels are JetPack 4.6 era. TensorRT is the only GPU route.
 

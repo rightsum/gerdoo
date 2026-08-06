@@ -386,7 +386,9 @@ Also: MJPEG-only means the Jetson CPU-decodes every frame, and JPEG artifacts si
   - Compatible: Arduino, Teensy, Raspberry Pi, Jetson (via I2C/GPIO)
   - Use case: Driving multiple servos from a single I2C bus — offloads PWM generation from the main controller
 
-**Power:** V+ (the large terminal, not the small VCC pins) comes from **MINI560 #2, the 5V dirty rail**. The small VCC pins only run the I2C chip; V+ is what actually drives current through the servos. Logic side (VCC/SDA/SCL) runs at 3.3V from the Teensy.
+**Power:** V+ (the large terminal, not the small VCC pins) needs a **5V supply capable of the servo stall current** — ❓ **source undecided, see the 5V rail open question in Power & Battery.** The small VCC pins only run the I2C chip; V+ is what actually drives current through the servos. Logic side (VCC/SDA/SCL) runs at 3.3V from the Teensy.
+
+> ⚠️ This board may not be in the new design at all — if the pan/tilt moves to STS3215 bus servos, the PCA9685 and its 5V rail both disappear.
 
 ⚠️ **Known past failure:** a MINI560 was previously wired to this board and produced nothing. Most likely cause is the module's **7V input minimum** — it was fed from a 5V rail, which is below the floor and violates the ≥2V input-to-output headroom rule. Feed it from the 12V pack. Other candidates, in order: ground not shared back to the controller (servos won't move even with good 5V), reversed IN/OUT pads, V+ terminal never wired. Verify with a bare-output 12V bench test before rewiring.
 
@@ -728,7 +730,7 @@ Current draw 5.3mA each; two units ≈ 11mA off the Teensy 3.3V regulator (~250m
 
 | Sensor pin | Teensy 4.1 | Note |
 |---|---|---|
-| VCC | 5V dirty rail (MINI560 #2) | not the Teensy 3.3V pin |
+| VCC | 5V — ❓ **source undecided** (see Power & Battery) | not the Teensy 3.3V pin. Avoided entirely by using the HC-SR04**P** at 3.3V |
 | TRIG | any digital pin | direct; 3.3V drives it in practice |
 | ECHO | any digital pin | **via 1.8kΩ series + 3.3kΩ to GND** = 3.24V |
 | GND | common GND | |
@@ -774,21 +776,151 @@ Current draw 5.3mA each; two units ≈ 11mA off the Teensy 3.3V regulator (~250m
 
 Design rule: **the 5V and 12V rails carry power only — never a signal that touches the Teensy.** Everything on the Teensy side lands at 3.3V (IBT-2 buffer VCC, encoders, HC-SR04P, lidar UART), so no level shifters are needed anywhere in the robot.
 
-| Rail | Converter | Loads | Notes |
+### ⚡ Two separate battery packs — this is the core of the design
+
+**There is no single "12V rail".** Two independent 3S packs with their own BMS, chosen to match their loads:
+
+| Pack | Cells | Capacity | **Max current** | Feeds |
+|---|---|---|---|---|
+| **Power pack** | 3S × **INR21700-40T** | 4000 mAh · 43 Wh | **35 A** (high drain) | drive motors, STS3215 arm servos |
+| **Electronics pack** | 3S × **INR21700-50E** | 5000 mAh · 54 Wh | **10 A** (high capacity) | Jetson, Teensy, sensors |
+
+Each has its own **3S 40A BMS** and holder. One spare cell of each type.
+
+**Why this matters more than any converter choice:** a stalled arm tripping the 40 A BMS **cannot** brown out the Jetson. A brownout mid-manipulation — losing SLAM, losing the ROS graph, losing control of the arm that is already jammed — is the worst failure this robot can have, and the split makes it impossible.
+
+The pairing is also right way round: high-drain cells where the current is, high-capacity cells where runtime matters.
+
+> ⚠️ The power pack is the **smaller** one — 43 Wh against 54 Wh. Both arms at rated torque is ~160 W, so **~16 minutes flat out.** Real duty cycles are far lower, but the arms will outrun the Jetson's runtime under heavy use.
+
+### Power Rail Architecture
+
+Design rule: **the power rails carry power only — never a signal that touches the Teensy.** Everything on the Teensy side lands at 3.3V (IBT-2 buffer VCC, encoders, HC-SR04P), so no level shifters are needed anywhere in the robot.
+
+| Rail | Source | Loads | Notes |
 |---|---|---|---|
-| ~~**5V quiet**~~ | ~~MINI560 #1~~ | ❌ **DELETED 2026-08-04** — the lidar was its only load and now runs off Jetson USB. **MINI560 #1 is a spare.** The ≤150mV ripple constraint is gone with it | |
-| **5V dirty** | **MINI560 #2** | SG90 servos, PCA9685 V+, classic HC-SR04, COB LED strip if 5V | ~0.9A typical, ~2.3A worst case (both SG90s stalled) vs 3–4A continuous rating |
-| **12V battery (3S)** | — | STS3215 bus servos, motors via IBT-2 B+, COB LED strip if 12V (via LR7843 MOSFET), **both buck inputs** | high current |
-| **Teensy 3.3V regulator** | onboard | IBT-2 header pin 7 (74HC244 VCC), motor encoders, HC-SR04P | logic reference for everything; ~250mA available, actual draw a few mA |
-| **Charger** | **XL4015 #1** | 19V input → 12.6V CC/CV to pack | requires the CC/CV variant — see module entry |
+| **12V power pack (3S 40T)** | battery | drive motors via IBT-2 B+, **STS3215 arm servos**, COB LED strip if 12V (via LR7843 MOSFET) | 35 A available — **fuse every branch**, see below |
+| **12V electronics pack (3S 50E)** | battery | Jetson, Teensy VIN, anything logic | 10 A available, ~2.8 A drawn |
+| **Teensy 3.3V regulator** | onboard | IBT-2 header pin 7 (74HC244 VCC), motor encoders, HC-SR04P | logic reference for everything; ~250 mA available, actual draw a few mA |
+| **Jetson USB 5V** | Jetson | RPLIDAR C1, Brio 500 camera | no converter involved — see Navigation & LiDAR |
+| **Charger** | **XL4015 #1** | 19V input → 12.6V CC/CV to pack | ⚠️ requires the CC/CV variant — **open item 1** |
+| ❓ **5V rail** | **UNKNOWN — see below** | | |
 
-Both bucks take input from the 12V pack; the MINI560's 7V floor is cleared across the full 3S discharge range (12.6V → ~9.0V).
+#### ❓ Open: the 5V rail
 
-**Neither 5V rail uses an adjustable converter.** MINI560 output is fixed, so no pot can drift or be left at the wrong setting — nothing upstream of the lidar, servos, or PCA9685 is capable of producing an overvoltage. The XL4015s stay off the 5V side entirely: one for the charger, one spare.
+**MINI560 is no longer in the design** (stated 2026-08-05), but what replaced it — and which loads still need 5V — is **not yet recorded**. Both former MINI560 rails are struck:
 
-Spares: **5 × MINI560** (#1 freed when the lidar moved to USB), 1 × XL4015.
+- ~~5V quiet (MINI560 #1)~~ — deleted 2026-08-04, lidar moved to Jetson USB
+- ~~5V dirty (MINI560 #2)~~ — was SG90 servos, PCA9685 V+, classic HC-SR04, COB LED strip
 
-> The lidar's ripple sensitivity used to drive this whole architecture — it is why a dedicated quiet rail existed. Moving it to Jetson USB removed the constraint, one converter, and one failure mode.
+Candidate loads that may or may not still exist: **PCA9685 + SG90 gimbal** (may be replaced by STS3215 bus servos), **classic HC-SR04** (open item 5 — HC-SR04P runs at 3.3V), **COB LED strip** (open item 2 — may be 12V).
+
+**Do not wire a 5V rail from this document until this is filled in.**
+
+Spares: **6 × MINI560** (all now unused), 1 × XL4015.
+
+> The lidar's ripple sensitivity used to drive this whole architecture — a dedicated quiet rail with ≤150 mV ripple existed solely for it. Moving it to Jetson USB removed the constraint, a converter, and a failure mode.
+
+---
+
+### 🔥 Fusing — the biggest safety gap
+
+**A BMS protects the cells. A fuse protects the wiring. They are not substitutes.**
+
+The 40 A BMS will not notice 7 A flowing through a 3 A wire. A short downstream of the BMS — a chafed servo lead on a moving joint, a dropped tool, a pinched wire against the chassis — sits there dumping 35 A into wire never designed for it, while the BMS reads a normal load.
+
+**Rule: a fuse protects the wire, not the load.** Fuse rating ≤ wire ampacity, and just above the branch's real maximum. If those two do not leave a gap, the wire is too thin.
+
+| Branch | Real max | **Fuse** | Min wire |
+|---|---|---|---|
+| Power pack main | ~24 A | **30 A** | 14 AWG |
+| Arm bus — left | 7.2 A rated / 21.6 A stall | **15 A** | 16 AWG |
+| Arm bus — right | 7.2 A rated / 21.6 A stall | **15 A** | 16 AWG |
+| Drive motors (via IBT-2) | ⚠️ **unknown** | **20 A** provisional | 14 AWG |
+| Electronics pack main | ~2.8 A | **5 A** | 18 AWG |
+
+Silicone wire ampacity (conservative, chassis): 14 AWG ≈ 30 A · 16 AWG ≈ 22 A · 18 AWG ≈ 16 A · 20 AWG ≈ 11 A · 22 AWG ≈ 7 A.
+
+**The 15 A arm fuse is deliberately below stall (21.6 A).** A whole-arm stall *should* cut power. It passes rated torque (7.2 A) and normal transients comfortably.
+
+**Type:** automotive **blade fuses, Standard (ATO/ATC) size** — not Mini. Rated 32 V DC, vibration-tolerant, inherently slightly slow so motor inrush does not nuisance-trip, holders come pre-wired. Standard has more contact area than Mini, so it runs cooler at 20–30 A, which is the failure being guarded against. Avoid glass cartridges (fragile) and PPTC (too slow, too resistive at these currents).
+
+**Placement: as close to the battery terminal as physically possible.** Every centimetre of wire *before* the fuse is unprotected, and that is the wire nearest the highest-energy source.
+
+Also fit a **main disconnect** per pack — one action that kills everything. Deans T-plugs work if they are reachable.
+
+---
+
+### 🦾 Arm power — daisy-chain limits
+
+Each STS3215 has two 3-pin connectors and passes **power and data** through its own PCB. Chain 8 and **the first connector carries all 8 servos' current**.
+
+[STS3215 12V](https://www.feetechrc.com/525603.html) per servo: idle 30 mA · no-load 180 mA · **rated torque 900 mA** · **stall 2.7 A**.
+
+| Arm state (8 servos) | Current through first connector |
+|---|---|
+| Holding position | 0.24 A |
+| Moving, unloaded | 1.44 A |
+| Light work, shoulder loaded | ~1–2 A |
+| All at rated torque | 7.2 A |
+| All stalled | 21.6 A |
+
+Stock bus cable is 24–26 AWG with a 3-pin JST, realistically **2–3 A**.
+
+**For light use, straight daisy-chaining is fine** — 1–2 A is inside the connector's rating, which is why the SO-ARM100 community does it without trouble. The risks, in order of likelihood:
+
+1. **Brownout and bus glitches — most likely, and not a fire.** Voltage drop along the chain means far-end servos see less than near-end. A fast multi-joint move sags the rail and distant servos reset or drop off the bus. **Presents as flaky behaviour that looks like a firmware bug.** If servos start dropping out during fast moves, and it gets worse further down the chain, that is voltage drop — not code.
+2. **Gradual connector degradation** — warm cycles raise contact resistance, which makes more heat. Shows up months later as an intermittent joint.
+3. **Stall — the one that matters, because it is never planned.** Gripper closes on something immovable, arm swings into the table, software commands a joint past its limit. 2.7 A per servo, with 35 A behind it.
+
+#### What to do, in order of value
+
+| Action | Priority |
+|---|---|
+| **Fuse the arm branch** (15 A) | **Do it** — €2, covers the unplanned case |
+| **Firmware torque/current limit** | **Do it** — the STS3215 accepts a cap over the bus and reports per-servo current, voltage and temperature. This *bounds the jam case entirely*, and acts before anything heats. Better protection than the fuse, because a fuse cannot tell a hard lift from a jam |
+| **Star-wire the power** | **When you load the arm, or when symptom 1 appears** — not needed for light use |
+
+#### Star wiring, when it becomes necessary
+
+Split each arm into groups of 2–3 servos, inject 12 V into each group, keep the data chain continuous:
+
+```
+                    ┌── 18AWG ──▶ [S1]─[S2]─[S3]   shoulder   2.7A
+16AWG               │
+pack ──[15A fuse]──▶├── 18AWG ──▶ [S4]─[S5]─[S6]   elbow      2.7A
+                    │
+                 terminal ─ 18AWG ──▶ [S7]─[S8]    wrist      1.8A
+                  block
+```
+
+To make an injection cable: take a spare STS3215 cable, **cut GND and 12V** and splice both ends to the feed, **leave the signal wire continuous**. Or buy a bus servo hub (Waveshare/Feetech) for the same result with less soldering.
+
+**Group by load, not convenience** — shoulder joints hold the arm against gravity continuously and deserve the shortest, fattest feed.
+
+⚠️ **Power bypasses the Waveshare adapter entirely.** That board is the UART interface; its 9–12.6 V input powers its own logic. Running 7 A of servo current through it is the thing being avoided.
+
+⚠️ **Ground must be common at one star point** — all injection points, the Waveshare adapter, and the pack negative. The bus is single-wire signalling referenced to ground; a ground offset between groups corrupts data and looks like random servo dropouts.
+
+---
+
+### Power budget
+
+| Load | Current @ 12V | Pack |
+|---|---|---|
+| Both arms holding | 0.48 A | power |
+| Both arms moving, unloaded | 2.88 A | power |
+| Both arms at rated torque | 14.4 A | power |
+| Drive motors, both | ⚠️ **unknown** (est. ~10 A) | power |
+| **Power pack worst realistic** | **~24 A of 35 A (69%)** | ✅ |
+| Both arms stalled | 43.2 A | ❌ over 40 A BMS — trips, by design |
+| Jetson at 25 W (MAXN) | 2.1 A | electronics |
+| Lidar + camera + Teensy + screen | ~0.7 A | electronics |
+| **Electronics pack total** | **~2.8 A of 10 A (28%)** | ✅ |
+
+**The architecture has margin.** The gaps are fusing, the arm daisy-chain under load, and an unverified charger — not capacity.
+
+⚠️ **The 36GP-555 current specs are missing** from this document (only voltage and RPM are recorded). That is the one hole in the budget, and it sits exactly where the drive base is. Measure stall current on the bench.
 
 #### Grounding — the actual failure mode
 
@@ -1385,13 +1517,16 @@ Things that need a meter or a look at the physical part, not a datasheet.
 | # | Item | Why it matters |
 |---|---|---|
 | 1 | **XL4015 pot count** — one or two? | Two = CC/CV, charger plan works. One = CV-only, do not charge lithium with it |
-| 2 | **COB LED strip voltage** | 5V → dirty rail; 12V → battery rail via LR7843 MOSFET |
-| 3 | **MINI560 bench test** | 12V in, output bare, meter across OUT± should read 5.0V. Confirms whether the old servo-board failure was the 7V input floor |
+| 2 | **COB LED strip voltage** | 12V → power pack via LR7843 MOSFET. **5V → needs open item 3 answered first**, since no 5V rail currently exists |
+| ~~3~~ | ~~MINI560 bench test~~ | ⬇️ **Demoted 2026-08-05** — MINI560 is no longer in the design. All 6 are spares. Only worth testing if a 5V rail comes back |
+| 3 | ❓ **What supplies 5V now** | MINI560 is out; the replacement and the remaining 5V loads are unrecorded. **Blocks any 5V wiring.** See Power Rail Architecture |
 | 4 | **Encoder wire colors on the actual motors** | Common scheme is blue = encoder VCC, red = motor. Legacy notes recorded red as encoder VCC. Wrong guess puts 12V into the encoder supply |
 | 5 | **HC-SR04 board revision** | Listing says 5V; the Handson guide covers a 3.3–5V V2.0 board. Measure ECHO idle-high before wiring |
 | ~~6~~ | ~~RPLIDAR C1 TX level~~ | ❌ **DELETED 2026-08-04** — lidar is on Jetson USB and never touches a Teensy pin |
 | 7 | **Screen power draw** | Meter the panel's **own** supply. A prior session measured ~5.9W *total Jetson board* power running the face, but the panel is fed separately so it likely sits outside that figure |
 | 8 | **Camera enumeration** | Set `uvcvideo quirks=128` **first**, then plug both OV9281s in and check `dmesg` for `Not enough bandwidth`. See Vision & Cameras |
+| 9 | **36GP-555 stall current** | Not recorded here — the one hole in the power budget, exactly where the drive base sits. Sets the drive-motor fuse (20A is provisional) |
+| 10 | **Which 5.5" panel is fitted** | The AM-OLED is listed *Pending* and the IPS as *BROKEN*. Touch does not enumerate at all — if the fitted panel is the broken IPS, that is the explanation. See Displays |
 
 Tracked with dates and pass conditions in [`ACTION-PLAN.md`](ACTION-PLAN.md) section B.
 
@@ -1407,6 +1542,7 @@ Everything on the Teensy side lands at **3.3V**; the 5V and 12V rails carry powe
 | Encoder VCC | 5V | **3.3V** | output level follows supply; Teensy is not 5V tolerant |
 | Ultrasonic | HC-SR04 @ 5V | **HC-SR04P @ 3.3V** | direct connect, no divider |
 | Lidar | — | **Jetson USB, not the Teensy** | it has its own MCU; `Serial1` freed, MINI560 #1 freed, ripple limit gone |
-| Servo power | Nano 5V | **MINI560 #2 from 12V** | 7V input floor; Nano 5V was never valid input |
+| Servo power | Nano 5V | **12V power pack direct** (STS3215 bus servos) | arms are 12V bus servos, no 5V conversion involved. Nano 5V was never a valid supply for anything |
+| Battery | one 3S pack | **two packs — 40T (35A) for power, 50E (10A) for electronics** | an arm stall tripping the 40A BMS cannot brown out the Jetson |
 
 No level shifters anywhere in the robot.
