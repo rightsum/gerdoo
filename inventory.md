@@ -804,20 +804,41 @@ Design rule: **the power rails carry power only — never a signal that touches 
 | **Teensy 3.3V regulator** | onboard | IBT-2 header pin 7 (74HC244 VCC), motor encoders, HC-SR04P | logic reference for everything; ~250 mA available, actual draw a few mA |
 | **Jetson USB 5V** | Jetson | RPLIDAR C1, Brio 500 camera | no converter involved — see Navigation & LiDAR |
 | **Charger** | **XL4015 #1** | 19V input → 12.6V CC/CV to pack | ⚠️ requires the CC/CV variant — **open item 1** |
-| ❓ **5V rail** | **UNKNOWN — see below** | | |
+| **5V servo rail** | **LM2596S** from 12.6V | SG90 neck pan/tilt servos | ✅ Live. 3A. Adjustable — see the 6V note below |
+| **5V lighting rail** | **MINI560** from 12.6V | COB LED strip via D4184 MOSFET | ✅ Live, added 2026-08-26. Dedicated, see below |
 
-#### ❓ Open: the 5V rail
+#### ✅ Resolved 2026-08-26: two separate 5V rails
 
-**MINI560 is no longer in the design** (stated 2026-08-05), but what replaced it — and which loads still need 5V — is **not yet recorded**. Both former MINI560 rails are struck:
+Answered by the LED strip bring-up — see [`logs/012`](logs/012-2026-08-26-led-strip-ambient-brightness.md).
 
+| Rail | Converter | Feeds | Why separate |
+|---|---|---|---|
+| **5V servo** | LM2596S from 12.6V, 3A | SG90 neck servos | |
+| **5V lighting** | MINI560 from 12.6V, 5A | COB LED strip via D4184 | The strip sagged the shared rail ~200 mV at full brightness and made the servos strain |
+
+**They were briefly on one rail and it did not work.** With the strip on the LM2596S alongside the servos, driving it to full brightness dropped the pack from 11.13 V to 10.94 V and the neck servos audibly strained. Splitting them fixed it. This is the same "5V dirty rail" grouping the original architecture warned about.
+
+⚠️ **Feed the MINI560 from 12.6V, never from the 5V rail.** Input floor is 7V with a ≥2V headroom rule; 5V in produces nothing. That is the most likely cause of the earlier dead-MINI560 incident recorded in Servos & Motor Control.
+
+Historical, both struck:
 - ~~5V quiet (MINI560 #1)~~ — deleted 2026-08-04, lidar moved to Jetson USB
 - ~~5V dirty (MINI560 #2)~~ — was SG90 servos, PCA9685 V+, classic HC-SR04, COB LED strip
 
-Candidate loads that may or may not still exist: **PCA9685 + SG90 gimbal** (may be replaced by STS3215 bus servos), **classic HC-SR04** (open item 5 — HC-SR04P runs at 3.3V), **COB LED strip** (open item 2 — may be 12V).
+Still not on any 5V rail: **PCA9685** (not currently used — servos drive from Teensy pins 2/3 directly), **classic HC-SR04** (open item 5 — the HC-SR04P runs at 3.3V).
 
-**Do not wire a 5V rail from this document until this is filled in.**
+#### 🔄 Planned: servo rail to 6V
 
-Spares: **6 × MINI560** (all now unused), 1 × XL4015.
+To get more torque out of the SG90s. **Not yet done** — three checks must pass first:
+
+1. **Nothing else on that rail.** Anything rated 5V absolute is damaged at 6V.
+2. ⚠️ **Teensy `VIN` must not be fed from it. Teensy 4.1 VIN maximum is 5.5V** — 6V destroys the board. The Teensy currently runs from Jetson USB, so VIN should be unwired; confirm physically.
+3. **Set the pot with the load disconnected**, meter on the bare output, then reconnect.
+
+⚠️ These specific SG90s are recorded at **4.8–5V** (Servos & Motor Control), not the 4.8–6V of generic datasheets. 6V is at or past their rating: more torque, but more heat and faster wear on plastic gears already carrying a 5.5" screen. One tilt servo has already been lost to stalling.
+
+**Better fix, using parts already owned:** 2 of the **16× STS3215** bus servos. 25× the torque, metal gears, position feedback, and they run straight off the 12V pack — deleting this rail question entirely. The migration notes already call for exactly this.
+
+Spares: **5 × MINI560** (1 now in use), 1 × XL4015.
 
 > The lidar's ripple sensitivity used to drive this whole architecture — a dedicated quiet rail with ≤150 mV ripple existed solely for it. Moving it to Jetson USB removed the constraint, a converter, and a failure mode.
 
@@ -1075,16 +1096,44 @@ Set both with a meter and **no pack connected**, then connect. Add a **Schottky 
   - Battery: Li-Ion/Li-Po charger
   - Variant: 10PCS
 
-### Isolated MOSFET Module (LR7843)
+### Isolated MOSFET Module (LR7843) — ❌ DOES NOT SWITCH, superseded
 - **Store:** YX Electronic Components Store
 - **Link:** https://www.aliexpress.com/item/1005007204205450.html
-- **Qty:** 1 · **Total:** €1.02 · **Status:** Completed
+- **Qty:** 1 · **Total:** €1.02 · **Status:** ❌ **Failed in service 2026-08-23**
+
+⚠️ **This module never switched its gate.** Power path was fine — shorting `LOAD` to `−`
+lit the load at full — but no drive turned the FET on: not 3.3V from a Teensy pin
+(either wire orientation), and not 5V jumpered straight to the header. Connecting it
+also dragged the driving pin to 0V. Replaced by the D4184 module below, which worked on
+the first bench test. Full debug trail in [`logs/012`](logs/012-2026-08-26-led-strip-ambient-brightness.md).
 - **Specs:**
   - MOSFET: LR7843 (also covers FR120N, AOD4184, D4184)
   - Voltage: 100V/30V (depends on variant)
   - Current: up to 161A peak
   - Function: High-power switch, relay replacement
   - Isolated: Opto-isolated gate drive
+
+### D4184 Dual MOSFET Trigger Switch Module (6pcs) — ✅ in service
+
+- **Store:** Amazon.de (AOICRIE)
+- **Qty:** 6 · **Total:** €6.99 · **Status:** Owned, 1 in service 2026-08-26
+- **Specs:**
+  - MOSFET: **AOD4184 ×2 in parallel** — genuine logic level
+  - **Trigger: DC 3.3V–20V** — stated as a spec, works directly from a Teensy pin
+  - Load supply: DC 5–36V · 15A continuous, 400W · 30A peak with cooling
+  - PWM: **0–20 kHz**
+  - Terminals: `VIN+` `VIN-` (supply in), `OUT+` `OUT-` (load), header `PWM` / `GND`
+- **In service:** COB LED strip, driven from Teensy pin 4 at 18 kHz
+
+Low-side switch, but the four-terminal layout hides that — `VIN+` passes through to
+`OUT+` internally and the FETs chop `OUT-` against `VIN-`, so the load just goes across
+`OUT+`/`OUT-` in its natural polarity. Much harder to miswire than a `+`/`LOAD`/`−` board.
+
+⚠️ **Do not buy the red "MOS Module" (HW-517) instead — it is IRF520-based.** Its
+listings claim 3.3V compatibility, but IRF520 Vgs(th) runs to 4V and Rds(on) is
+specified at a 10V gate, so a 3.3V pin leaves it in the linear region: dim output, hot
+FET, or nothing. Check the TO-220 marking in the listing photos, not the bullet points.
+Logic-level parts that do work: **AOD4184/D4184**, **IRLZ44N**, **IRLB8721**.
 
 ### Rectifier Diode 10A10 (50pcs)
 - **Store:** DeceKey Electronics Store
@@ -1095,6 +1144,19 @@ Set both with a meter and **no pack connected**, then connect. Add a **Schottky 
   - Current: 10A
   - Voltage: 1000V reverse
   - Package: R-6 (axial)
+  - ⚠️ **Not suitable for charge path** — silicon drop ~0.7-1.0V varies with current, wrecks CV accuracy. Use for AC rectification only.
+
+### Schottky Diode 30SQ050 (20pcs) — for charge path reverse-current protection
+- **Store:** Amazon.de (DYOUen) · **ASIN:** B0BYVGWTHD
+- **Link:** https://www.amazon.de/dp/B0BYVGWTHD
+- **Qty:** 20 · **Price:** €5.99 · **Status:** Ordered 2026-08-19
+- **Specs:**
+  - Type: 30SQ050 Schottky diode
+  - Current: 30A (12× headroom over 2.37A charge current)
+  - Voltage: 50V reverse
+  - Forward drop: ~0.3-0.4V (Schottky — stable across charge cycle)
+  - Package: Axial, 6.2 cm length
+- **Use case:** Reverse-current protection between XL4015 output and 3S pack. Prevents battery draining backward through the XL4015 when the 19V source is off. Oriented: anode → converter, cathode (band/`-` side) → pack. Set CV to 12.60V measured at pack terminals (after diode).
 
 ---
 
@@ -1235,7 +1297,27 @@ Set both with a meter and **no pack connected**, then connect. Add a **Schottky 
   - Mounting: Magnetic attachment
   - Colors available: White / Black / Yellow
   - Size: 2.2mm
+  - **Voltage: 5V** — measured 2026-08-26, was open item 2
   - Use case: Robot illumination / lighting
+- **In service 2026-08-26:** dedicated MINI560 5V rail → D4184 MOSFET → Teensy pin 4 PWM
+  at 18 kHz, brightness following the A1 photoresistor. Wiring in `PINOUT.md`,
+  bring-up in [`logs/012`](logs/012-2026-08-26-led-strip-ambient-brightness.md)
+
+⚠️ **No inline fuse fitted yet.** This branch is currently unprotected — see Fusing.
+
+### Keyestudio Photoresistor Module — ✅ in service
+
+- **Qty:** 1 · **Status:** In service 2026-08-26
+- **Specs:**
+  - Photoresistor with the 10k half of the divider **onboard** — no external resistor
+  - Pins: `S` (analog out) · `V` (supply) · `G` (ground)
+- **Wiring:** `G` → Teensy GND · `V` → **Teensy 3.3V** · `S` → Teensy A1 (pin 15)
+
+⚠️ **Power from 3.3V, never 5V.** `S` is a divider off its own supply, so a 5V module
+puts 5V on a 3.3V ADC pin.
+
+Divider polarity varies by batch. Firmware has an `LDR_BRIGHT_IS_HIGH` constant and
+`CAL dark` / `CAL bright` console commands to handle it — see `PINOUT.md`.
 
 ---
 
@@ -1517,9 +1599,11 @@ Things that need a meter or a look at the physical part, not a datasheet.
 | # | Item | Why it matters |
 |---|---|---|
 | 1 | **XL4015 pot count** — one or two? | Two = CC/CV, charger plan works. One = CV-only, do not charge lithium with it |
-| 2 | **COB LED strip voltage** | 12V → power pack via LR7843 MOSFET. **5V → needs open item 3 answered first**, since no 5V rail currently exists |
+| ~~2~~ | ~~**COB LED strip voltage**~~ | ✅ **ANSWERED 2026-08-26 — it is a 5V strip.** Full brightness on the 5V rail with the MOSFET bypassed. Now on its own MINI560 rail. See [`logs/012`](logs/012-2026-08-26-led-strip-ambient-brightness.md) |
 | ~~3~~ | ~~MINI560 bench test~~ | ⬇️ **Demoted 2026-08-05** — MINI560 is no longer in the design. All 6 are spares. Only worth testing if a 5V rail comes back |
-| 3 | ❓ **What supplies 5V now** | MINI560 is out; the replacement and the remaining 5V loads are unrecorded. **Blocks any 5V wiring.** See Power Rail Architecture |
+| ~~3~~ | ~~❓ **What supplies 5V now**~~ | ✅ **ANSWERED 2026-08-26.** Two rails: **LM2596S** → SG90 servos, **MINI560** → COB LED strip. Split because they interfered on one rail. See Power Rail Architecture |
+| 11 | **COB LED strip current at full brightness** | Meter in series with the strip. Sizes the fuse and confirms the MINI560 headroom. Currently inferred only from a ~200 mV pack sag — **indirect** |
+| 12 | **Is Teensy `VIN` wired to the LM2596S rail?** | ⚠️ Blocks the planned 6V servo change. **Teensy 4.1 VIN maximum is 5.5V** — 6V destroys the board |
 | 4 | **Encoder wire colors on the actual motors** | Common scheme is blue = encoder VCC, red = motor. Legacy notes recorded red as encoder VCC. Wrong guess puts 12V into the encoder supply |
 | 5 | **HC-SR04 board revision** | Listing says 5V; the Handson guide covers a 3.3–5V V2.0 board. Measure ECHO idle-high before wiring |
 | ~~6~~ | ~~RPLIDAR C1 TX level~~ | ❌ **DELETED 2026-08-04** — lidar is on Jetson USB and never touches a Teensy pin |

@@ -24,6 +24,8 @@ NNN-YYYY-MM-DD-short-title.md
 | [008](008-2026-08-04-control-panel-camera-lidar.md) | 2026-08-04 | Control panel — authenticated camera stream + live LiDAR view | ✅ Deployed |
 | [009](009-2026-08-04-lidar-motor-kept-spinning.md) | 2026-08-04 | LiDAR motor kept spinning after the service stopped | ✅ Fixed |
 | [010](010-2026-08-04-gesture-detection-and-gpu-evaluation.md) | 2026-08-04 | Hand gesture detection + tracking, and a GPU acceleration evaluation | ✅ CPU shipped · ⏸️ GPU deferred |
+| [011](011-2026-08-19-charger-stepdown-voltage-test.md) | 2026-08-19/20 | 19V charger → step-down → 3S battery charging, battery monitoring, neck servos, fist tracking | ✅ Charging tested · 🔄 Servo replacement pending |
+| [012](012-2026-08-26-led-strip-ambient-brightness.md) | 2026-08-23/26 | COB LED strip on a D4184 MOSFET, ambient brightness from a photoresistor, Teensy flashing fixes | ✅ Working · 🔄 Fuse + current measurement pending |
 
 Entries are either **problems** (001, 003) or **design decision records** (002). Both belong here — a decision you cannot reconstruct the reasoning for is as expensive as a bug you cannot reproduce.
 
