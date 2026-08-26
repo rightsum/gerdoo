@@ -157,7 +157,23 @@
       </div>
       {% if has_password %}
       <div class="panel-body empty" id="cam-body">
-        <div class="stage" id="cam-stage">
+    
+        <div class="stage" id="cam-stage">        <div id="servo-controls" style="display:none;position:absolute;top:8px;right:8px;z-index:10;background:rgba(10,16,28,0.85);border:1px solid #2a3a5a;border-radius:8px;padding:8px">
+          <div style="font-size:10px;color:#8493b3;text-align:center;margin-bottom:4px">NECK</div>
+          <div style="font-size:11px;color:#8493b3;font-family:ui-monospace,monospace;text-align:center;margin-bottom:6px" id="servo-pos">110,90</div>
+          <div style="display:grid;grid-template-columns:26px 26px 26px;grid-template-rows:26px 26px 26px;gap:2px">
+            <div></div>
+            <button onclick="servoMove(0,5)" style="font-size:13px;cursor:pointer;border:1px solid #2a3a5a;border-radius:3px;background:rgba(26,36,56,0.9);color:#e0e6f0">&uarr;</button>
+            <div></div>
+            <button onclick="servoMove(-5,0)" style="font-size:13px;cursor:pointer;border:1px solid #2a3a5a;border-radius:3px;background:rgba(26,36,56,0.9);color:#e0e6f0">&larr;</button>
+            <button onclick="servoCenter()" style="font-size:10px;cursor:pointer;border:1px solid #2a3a5a;border-radius:3px;background:rgba(26,36,56,0.9);color:#8493b3">&#x25CF;</button>
+            <button onclick="servoMove(5,0)" style="font-size:13px;cursor:pointer;border:1px solid #2a3a5a;border-radius:3px;background:rgba(26,36,56,0.9);color:#e0e6f0">&rarr;</button>
+            <div></div>
+            <button onclick="servoMove(0,-5)" style="font-size:13px;cursor:pointer;border:1px solid #2a3a5a;border-radius:3px;background:rgba(26,36,56,0.9);color:#e0e6f0">&darr;</button>
+            <div></div>
+          </div>
+        </div>
+
           <img id="cam-img" alt="Camera stream">
           <div class="gesture-badge" id="gesture-badge"><span id="gesture-emoji">✊</span><span id="gesture-name"></span></div>
           <div class="reticle" id="reticle"></div>
@@ -215,6 +231,37 @@
       <div class="locked">🔒 Set a control-panel password before starting the lidar.</div>
       {% endif %}
     </section>
+
+    <!-- ---------------- Battery ---------------- -->
+    <section class="panel" id="battery-panel">
+      <div class="panel-head">
+        <h2>Battery</h2>
+      </div>
+      <div class="panel-body" id="battery-body">
+        <div style="display:flex;flex-direction:column;gap:12px;padding:8px 0">
+          <div>
+            <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
+              <span style="font-weight:600;font-size:14px">Main Battery</span>
+              <span style="font-size:13px;color:#8493b3;font-family:ui-monospace,monospace" id="bat-main-text">—</span>
+            </div>
+            <div style="height:10px;border-radius:5px;background:#1e2a4a;overflow:hidden">
+              <div id="bat-main-fill" style="height:100%;width:0;border-radius:5px;transition:width 0.5s;background:linear-gradient(90deg,#37d67a,#2ad4ff)"></div>
+            </div>
+          </div>
+          <div>
+            <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
+              <span style="font-weight:600;font-size:14px">Jetson Battery</span>
+              <span style="font-size:13px;color:#8493b3;font-family:ui-monospace,monospace" id="bat-jetson-text">—</span>
+            </div>
+            <div style="height:10px;border-radius:5px;background:#1e2a4a;overflow:hidden">
+              <div id="bat-jetson-fill" style="height:100%;width:0;border-radius:5px;transition:width 0.5s;background:linear-gradient(90deg,#37d67a,#2ad4ff)"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    
   </main>
   <div class="toast" id="toast"></div>
 
@@ -300,6 +347,7 @@
     let camOn = false;
 
     function camReflect(s) {
+      servoSetVisible(s && s.running);
       camOn = !!s.running;
       camToggle.classList.toggle('on', camOn);
       camBody.classList.toggle('empty', !camOn);
@@ -393,6 +441,14 @@
     const reticle  = document.getElementById('reticle');
     const readout  = document.getElementById('track-readout');
 
+    // ---- Fist tracking state ----
+    let fistTracking = false;
+    let savedMood = null;
+    let lastServoTrack = 0;
+    const TRACK_GAIN = 30;       // degrees of servo movement per unit error
+    const TRACK_DEADZONE = 0.03; // ignore tiny errors (prevents jitter)
+    const TRACK_INTERVAL = 250;  // ms between servo corrections (throttle)
+
     function showGesture(d) {
       // --- classification badge ---
       if (!d || !d.gesture) {
@@ -405,10 +461,38 @@
         gBadge.classList.toggle('fist', !!d.is_fist);
       }
 
-      // --- tracking reticle ---
-      // Position is published every frame, independently of the gesture label,
-      // so the reticle keeps following a hand whose gesture is unrecognised.
+      // --- Fist tracking: mood change + neck follows fist ---
       const p = d && d.pos;
+      const isFist = !!(d && d.is_fist);
+      if (isFist && !fistTracking) {
+        // Enter tracking mode: save mood, switch to love
+        fistTracking = true;
+        fetch('/api/state').then(r => r.json()).then(s => {
+          savedMood = s.mood || 'auto';
+          fetch('/api/state', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({mood:'love'})});
+        }).catch(() => {});
+      } else if (!isFist && fistTracking) {
+        // Exit tracking mode: restore mood
+        fistTracking = false;
+        if (savedMood) {
+          fetch('/api/state', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({mood:savedMood})});
+          savedMood = null;
+        }
+      }
+      // While tracking, adjust neck to center the fist
+      if (fistTracking && p && p.err_x !== undefined) {
+        const now = Date.now();
+        if (now - lastServoTrack > TRACK_INTERVAL) {
+          lastServoTrack = now;
+          let dP = 0, dT = 0;
+          if (Math.abs(p.err_x) > TRACK_DEADZONE) dP = Math.round(-p.err_x * TRACK_GAIN);
+          if (Math.abs(p.err_y) > TRACK_DEADZONE) dT = Math.round(-p.err_y * TRACK_GAIN);
+          if (dP !== 0 || dT !== 0) servoMove(dP, dT);
+        }
+      }
+
+      // --- tracking reticle ---, independently of the gesture label,
+      // so the reticle keeps following a hand whose gesture is unrecognised.
       if (!p) {
         reticle.classList.remove('show');
         readout.classList.remove('show');
@@ -461,6 +545,78 @@
       try { gReflect(await api('/api/gesture/status')); } catch {}
     })();
     {% endif %}
-  </script>
+  
+    // ---- Battery ----
+    async function pollBattery() {
+      try {
+        const r = await fetch('/api/battery');
+        const d = await r.json();
+        const mb = d.main_battery, jb = d.jetson_battery;
+        if (mb && mb.voltage != null) {
+          document.getElementById('bat-main-fill').style.width = (mb.percent||0) + '%';
+          document.getElementById('bat-main-text').textContent = mb.voltage.toFixed(2) + 'V · ' + (mb.percent||0) + '%';
+        }
+        if (jb && jb.voltage != null) {
+          document.getElementById('bat-jetson-fill').style.width = (jb.percent||0) + '%';
+          document.getElementById('bat-jetson-text').textContent = jb.voltage.toFixed(2) + 'V · ' + (jb.percent||0) + '%';
+        }
+      } catch {}
+    }
+    setInterval(pollBattery, 3000);
+    pollBattery();
+
+
+    // ---- Neck Servos ----
+    var servoPan = 90, servoTilt = 90;
+    async function servoUpdate() {
+      try {
+        const r = await fetch('/api/servo');
+        const d = await r.json();
+        if (d.pan != null) servoPan = d.pan;
+        if (d.tilt != null) servoTilt = d.tilt;
+        var el = document.getElementById('servo-pos');
+        if (el) el.textContent = servoPan + ',' + servoTilt;
+      } catch {}
+    }
+    async function servoMove(dPan, dTilt) {
+      servoPan = Math.max(70, Math.min(140, servoPan + dPan));
+      servoTilt = Math.max(60, Math.min(120, servoTilt + dTilt));
+      var el = document.getElementById('servo-pos');
+      if (el) el.textContent = servoPan + ',' + servoTilt;
+      try {
+        const r = await fetch('/api/servo', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({pan:servoPan, tilt:servoTilt})});
+        const d = await r.json();
+        if (d.pan != null) servoPan = d.pan;
+        if (d.tilt != null) servoTilt = d.tilt;
+        if (el) el.textContent = servoPan + ',' + servoTilt;
+      } catch {}
+    }
+    async function servoCenter() {
+      servoPan = 110; servoTilt = 90;
+      var el = document.getElementById('servo-pos');
+      if (el) el.textContent = 'pan=110 tilt=90';
+      try {
+        await fetch('/api/servo', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({pan:110, tilt:90})});
+      } catch {}
+    }
+    // Show/hide servo controls when camera toggles
+    function servoSetVisible(on) {
+      var el = document.getElementById('servo-controls');
+      if (el) el.style.display = on ? 'block' : 'none';
+    }
+    // Keyboard arrow keys
+    document.addEventListener('keydown', function(e) {
+      var sc = document.getElementById('servo-controls');
+      if (!sc || sc.style.display === 'none') return;
+      switch(e.key) {
+        case 'ArrowUp':    e.preventDefault(); servoMove(0, 5);  break;
+        case 'ArrowDown':  e.preventDefault(); servoMove(0, -5); break;
+        case 'ArrowLeft':  e.preventDefault(); servoMove(-5, 0); break;
+        case 'ArrowRight': e.preventDefault(); servoMove(5, 0);  break;
+      }
+    });
+    servoUpdate();
+
+</script>
 </body>
 </html>

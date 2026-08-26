@@ -493,6 +493,65 @@ def api_gesture_stream():
     )
 
 
+# ---- Battery ----
+BATTERY_FILE = "/tmp/battery_status.json"
+
+@app.route("/api/battery")
+def api_battery():
+    try:
+        with open(BATTERY_FILE) as f:
+            return jsonify(json.load(f))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return jsonify({"main_battery": None, "jetson_battery": None})
+
+# ---- Servo (neck pan/tilt) ----
+import subprocess as _sp
+
+def _send_teensy(cmd):
+    """Send a command to the Teensy console and return its response."""
+    try:
+        port = "/dev/serial/by-id/usb-Teensyduino_Dual_Serial_19627940-if00"
+        p = _sp.Popen(["cat", port], stdout=_sp.PIPE, stderr=_sp.PIPE)
+        import time as _t; _t.sleep(0.15)
+        _sp.run(["bash", "-c", f"echo {cmd} > {port}"])
+        _t.sleep(0.3)
+        p.terminate()
+        out = p.stdout.read().decode()
+        for line in out.strip().split("\n"):
+            if "SERVO" in line and "set" in line:
+                return line
+        return out.strip().split("\n")[-1] if out.strip() else "no response"
+    except Exception as e:
+        return str(e)
+
+@app.route("/api/servo")
+def api_servo_get():
+    r = _send_teensy("SERVO")
+    # Parse "SERVO set pan=20 tilt=160" or "SERVO current pan=45 tilt=135"
+    pan = tilt = None
+    for part in r.split():
+        if part.startswith("pan="): pan = int(part[4:])
+        if part.startswith("tilt="): tilt = int(part[5:])
+    return jsonify({"pan": pan, "tilt": tilt, "raw": r})
+
+@app.route("/api/servo", methods=["POST"])
+def api_servo_set():
+    data = request.get_json(force=True)
+    pan = data.get("pan")
+    tilt = data.get("tilt")
+    cmd_parts = []
+    if pan is not None: cmd_parts.append(f"pan={int(pan)}")
+    if tilt is not None: cmd_parts.append(f"tilt={int(tilt)}")
+    if not cmd_parts:
+        return jsonify({"error": "no pan or tilt specified"}), 400
+    r = _send_teensy("SERVO " + " ".join(cmd_parts))
+    pan = tilt = None
+    for part in r.split():
+        if part.startswith("pan="): pan = int(part[4:])
+        if part.startswith("tilt="): tilt = int(part[5:])
+    return jsonify({"pan": pan, "tilt": tilt, "raw": r})
+
+
 if __name__ == "__main__":
     cfg = load_config()
     app.run(host="0.0.0.0", port=cfg["port"], threaded=True)
