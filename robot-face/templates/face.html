@@ -27,13 +27,83 @@
   {% else %}
   <script src="{{ url_for('static', filename='robot-face-gl.js') }}"></script>
   {% endif %}
+  <script src="https://cdn.jsdelivr.net/npm/livekit-client@2/dist/livekit-client.umd.min.js"></script>
   <script>
     const face = document.querySelector('robot-face');
+
+    let lastVoice = 'idle';
 
     function apply(state) {
       if (!state) return;
       if (state.mood)  face.setAttribute('emotion', state.mood);
       if (state.color) face.setAttribute('color', state.color);
+
+      const v = state.voice || 'idle';
+      if (v !== lastVoice) {
+        lastVoice = v;
+        if (v === 'connecting') joinVoice();
+        if (v === 'idle') leaveVoice();
+      }
+    }
+
+    // ---- Voice session -------------------------------------------------
+    // The client lives in the browser rather than in a Python service on the
+    // Jetson for one reason: the speaker sits beside the microphone, and
+    // WebRTC gives us echo cancellation for free. Without it the robot
+    // transcribes its own voice and talks to itself.
+    let room = null;
+
+    async function report(voiceState) {
+      try {
+        await fetch('/api/voice/state', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ voice: voiceState }),
+        });
+      } catch {}
+    }
+
+    async function joinVoice() {
+      if (room) return;                       // already in a session
+      try {
+        const res = await fetch('/api/voice/wake', { method: 'POST' });
+        const { url, token } = await res.json();
+
+        room = new LivekitClient.Room({
+          adaptiveStream: true,
+          audioCaptureDefaults: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+        });
+
+        room.on(LivekitClient.RoomEvent.TrackSubscribed, (track) => {
+          if (track.kind === 'audio') track.attach();   // plays agent speech
+        });
+        room.on(LivekitClient.RoomEvent.ActiveSpeakersChanged, (speakers) => {
+          const agentTalking = speakers.some(s => s.identity !== 'face');
+          report(agentTalking ? 'speaking' : 'listening');
+        });
+        room.on(LivekitClient.RoomEvent.Disconnected, () => {
+          room = null;
+          report('idle');
+        });
+
+        await room.connect(url, token);
+        await room.localParticipant.setMicrophoneEnabled(true);
+        report('listening');
+      } catch (e) {
+        room = null;
+        report('error');
+        setTimeout(() => report('idle'), 3000);
+      }
+    }
+
+    async function leaveVoice() {
+      if (!room) return;
+      try { await room.disconnect(); } catch {}
+      room = null;
     }
 
     // Live updates via Server-Sent Events, with automatic reconnect if the
