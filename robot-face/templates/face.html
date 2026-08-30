@@ -60,7 +60,7 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ voice: voiceState }),
         });
-      } catch {}
+      } catch (e) { console.warn('voice state report failed:', e); }
     }
 
     async function joinVoice() {
@@ -94,6 +94,7 @@
         await room.localParticipant.setMicrophoneEnabled(true);
         report('listening');
       } catch (e) {
+        if (room) { try { await room.disconnect(); } catch {} }
         room = null;
         report('error');
         setTimeout(() => report('idle'), 3000);
