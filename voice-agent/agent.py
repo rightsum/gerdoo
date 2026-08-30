@@ -66,7 +66,6 @@ async def entrypoint(ctx: JobContext):
         log.info("user: %s", text)
         if is_closing_phrase(text):
             log.info("closing phrase heard, ending session")
-            ctx.add_shutdown_callback(lambda: None)
             session.interrupt()
             ctx.shutdown(reason="closing phrase")
 
