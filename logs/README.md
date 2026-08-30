@@ -26,6 +26,7 @@ NNN-YYYY-MM-DD-short-title.md
 | [010](010-2026-08-04-gesture-detection-and-gpu-evaluation.md) | 2026-08-04 | Hand gesture detection + tracking, and a GPU acceleration evaluation | ✅ CPU shipped · ⏸️ GPU deferred |
 | [011](011-2026-08-19-charger-stepdown-voltage-test.md) | 2026-08-19/20 | 19V charger → step-down → 3S battery charging, battery monitoring, neck servos, fist tracking | ✅ Charging tested · 🔄 Servo replacement pending |
 | [012](012-2026-08-26-led-strip-ambient-brightness.md) | 2026-08-23/26 | COB LED strip on a D4184 MOSFET, ambient brightness from a photoresistor, Teensy flashing fixes | ✅ Working · 🔄 Fuse + current measurement pending |
+| [013](013-2026-08-29-audio-and-persian-wake-word.md) | 2026-08-29/30 | USB speaker output, and a Persian wake word ("Gerdoo, baba") via grammar-restricted Vosk | 🔄 Working, tuning false positives · range ~4 m |
 
 Entries are either **problems** (001, 003) or **design decision records** (002). Both belong here — a decision you cannot reconstruct the reasoning for is as expensive as a bug you cannot reproduce.
 

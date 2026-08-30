@@ -1334,6 +1334,40 @@ Divider polarity varies by batch. Firmware has an `LDR_BRIGHT_IS_HIGH` constant 
   - Includes: USB-A to USB-C adapter
   - Power: USB-powered
   - Use case: Audio output for the robot (alerts, TTS, sound feedback)
+- **In service 2026-08-29.** ALSA **card 3**, `USB2.0 Device` at `usb-3610000.usb-2.1.3`.
+  Stereo out 48 kHz S16_LE, **plus a mono capture endpoint** — it has a mic of its own.
+  Set as the PulseAudio default sink.
+
+⚠️ **The ALSA hardware mixer ships at 15%** (`PCM` = 39/255), which reads as a broken or
+faint speaker. PulseAudio's level rides on top of it, so `amixer -c 3 sset PCM <n>%` is
+the control that matters — not `pactl set-sink-volume`.
+
+> The sink defaults to the **iec958** (S/PDIF) profile. If PulseAudio playback is silent
+> while direct ALSA works, switch the card to `analog-stereo`.
+
+### 🎙️ Wake word — "Gerdoo, baba" (گردو بابا)
+
+Offline Persian wake-word trigger. Full write-up in
+[`logs/013`](logs/013-2026-08-29-audio-and-persian-wake-word.md).
+
+| | |
+|---|---|
+| **Engine** | Vosk, `vosk-model-small-fa-0.42` (97 MB, `~/models/`), CPU, fully offline |
+| **Mic** | **Brio 500** — chosen over the speaker's own mic so the robot cannot hear itself |
+| **Method** | Decoder grammar with filler competitors, final results only, both words required |
+| **Gain** | **3.0×** in software — measured by replay, not guessed |
+| **Service** | `wake-word.service`, systemd `--user`, enabled at boot |
+| **Measured** | 18/18 detections on the bench. ⚠️ **False positives in real use** — see the correction in log 013 |
+| **Range** | ~4 m. Beyond that needs a better mic, not more tuning |
+
+⚠️ **The Brio's capture gain does not survive a reboot**, and the 4 m range depends on it
+being at the top of its range (54 dB / 72). The unit re-applies it in `ExecStartPre`.
+
+⚠️ **PortAudio device indices move between reboots and replugs** — the same trap as
+`/dev/ttyACM*`. Select the mic by name (`--device-name Brio`), never by index.
+
+⚠️ **`paplay` accepts an mp3 path and silently plays nothing.** That is indistinguishable
+from the detector not firing. Use `mpg123` for compressed audio.
 
 ---
 
