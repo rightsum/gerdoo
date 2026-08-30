@@ -235,6 +235,8 @@ def _set_voice(state):
 @app.route("/api/voice/wake", methods=["POST"])
 def api_voice_wake():
     """Called by the wake-word service. Mints a token and tells the face to join."""
+    if not local_only():
+        return jsonify(error="forbidden"), 403
     url, key, secret = _voice_cfg()
     token = voice.mint_token(VOICE_ROOM, "face", key, secret)
     _set_voice("connecting")
@@ -244,6 +246,8 @@ def api_voice_wake():
 @app.route("/api/voice/state", methods=["POST"])
 def api_voice_state():
     """Called by the browser as the session progresses."""
+    if not local_only():
+        return jsonify(error="forbidden"), 403
     data = request.get_json(force=True, silent=True) or {}
     state = data.get("voice")
     if not voice.is_valid_state(state):
@@ -254,6 +258,8 @@ def api_voice_state():
 @app.route("/api/voice/status")
 def api_voice_status():
     """Polled by the wake-word service so it knows when to resume listening."""
+    if not local_only():
+        return jsonify(error="forbidden"), 403
     return jsonify({"voice": load_state().get("voice", "idle")})
 
 
