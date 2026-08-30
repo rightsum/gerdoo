@@ -1,0 +1,354 @@
+#!/usr/bin/env python3
+"""
+Wake-word trigger — listens for the Persian phrase "Gerdoo, baba" (گردو بابا)
+and plays a chime when it hears it.
+
+Approach: Vosk offline ASR with the decoder's grammar restricted to the wake
+phrase and nothing else. With only "گردو بابا" and "[unk]" available, the
+recogniser cannot wander off into acoustically similar Persian words — which is
+exactly what free-form decoding did during calibration, where "گردو" lost out to
+"کردی" and the model mostly settled on the bare "بابا".
+
+Two things learned from that calibration run, both encoded here:
+
+  * Fire on FINAL results, not partials. Partial hypotheses are unstable and
+    triggered mid-sentence on unrelated speech.
+  * Gate on the decoder's word confidences. The grammar makes a match easy to
+    reach, so confidence is what keeps false accepts down.
+
+Runs entirely offline. No audio leaves the robot; nothing is written to disk
+unless --record or --save-hits is passed.
+
+    python3 wake_word.py --list-devices
+    python3 wake_word.py --device 24                        # live
+    python3 wake_word.py --device 24 --record session.wav   # live + capture
+    python3 wake_word.py --replay session.wav --threshold 0.5
+    python3 wake_word.py --replay session.wav --sweep
+"""
+
+import argparse
+import json
+import os
+import queue
+import subprocess
+import sys
+import time
+import wave
+from datetime import datetime
+
+import numpy as np
+from scipy.signal import resample_poly
+from vosk import Model, KaldiRecognizer, SetLogLevel
+
+DEFAULT_MODEL = os.path.expanduser("~/models/vosk-model-small-fa-0.42")
+DEFAULT_SOUND = os.path.expanduser("~/wake-word/sounds/janam.mp3")
+
+WAKE_PHRASE = "گردو بابا"
+WAKE_HEAD = "گردو"          # the discriminating half; "بابا" alone is far too common
+
+# Two grammars, and the difference matters far more than the confidence threshold.
+#
+# STRICT is the phrase and "[unk]" only. It maximises recall, but "[unk]" is a
+# weak absorber: with nothing else on offer, ordinary speech collapses onto the
+# one real phrase available. That is the false-positive mode seen in service.
+#
+# FILLER adds competing words — deliberately including the near neighbours of
+# "گردو" that fell out of the open-mode calibration (کردی, کردم, کرده) plus
+# common conversational Persian. Giving the decoder somewhere else to go is what
+# suppresses false accepts; a narrower grammar makes them worse, not better.
+GRAMMAR_STRICT = json.dumps([WAKE_PHRASE, "[unk]"], ensure_ascii=False)
+
+FILLER_WORDS = [
+    # near neighbours of گردو, straight from the calibration transcript
+    "کردی", "کردم", "کرده", "کردن", "گرفتم", "برو", "بردار", "درو", "گرم",
+    # bare "بابا" — the model emitted this constantly from ordinary speech
+    "بابا", "مامان", "آقا", "خانم",
+    # common conversational filler
+    "الان", "خوبه", "دارم", "داره", "میکنه", "بیا", "چیه", "یه", "که", "این",
+    "اون", "هست", "نیست", "خیلی", "چرا", "کجا", "آره", "نه", "باشه", "ممنون",
+]
+GRAMMAR_FILLER = json.dumps([WAKE_PHRASE] + FILLER_WORDS + ["[unk]"],
+                            ensure_ascii=False)
+
+SAMPLE_RATE = 16000     # what the Vosk models expect
+# The USB speaker's mic is 48 kHz-only and PortAudio refuses to open it at
+# 16 kHz, so capture native and decimate. 48000/16000 = 3 exactly, a clean
+# integer decimation. The Brio does both; 48 k keeps one code path.
+CAPTURE_RATE = 48000
+BLOCK_SECONDS = 0.25
+
+
+def play(path):
+    """
+    Fire the response sound without blocking the audio loop.
+
+    Dispatched by extension: paplay and aplay handle PCM only, so an mp3 handed
+    to them fails silently — which looks exactly like the detector not firing.
+    """
+    env = dict(os.environ)
+    env.setdefault("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+    if path.lower().endswith((".mp3", ".m4a", ".ogg", ".flac")):
+        players = (["mpg123", "-q", path], ["ffplay", "-nodisp", "-autoexit", path])
+    else:
+        players = (["paplay", path], ["aplay", "-q", path])
+    for player in players:
+        try:
+            subprocess.Popen(player, env=env,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return
+        except FileNotFoundError:
+            continue
+    print(f"no player available for {path}", file=sys.stderr)
+
+
+def score(result):
+    """
+    (matched, mean_confidence, text) for one final Vosk result.
+
+    Vosk reports a per-word confidence in `result`. Averaging over just the wake
+    phrase's words — rather than the whole utterance — keeps surrounding speech
+    from dragging the score around.
+    """
+    text = result.get("text", "").strip()
+    # Require BOTH words. Under the filler grammar "بابا" can be emitted on its
+    # own, so the head word alone is no longer sufficient evidence.
+    if WAKE_HEAD not in text or "بابا" not in text:
+        return False, 0.0, text
+    words = [w for w in result.get("result", []) if w.get("word") in (WAKE_HEAD, "بابا")]
+    if not words:
+        return True, 1.0, text          # no per-word data; grammar match alone
+    conf = sum(w.get("conf", 0.0) for w in words) / len(words)
+    return True, conf, text
+
+
+def to_model_rate(raw, decim, gain=1.0):
+    """Native-rate int16 bytes -> 16 kHz int16 bytes, with optional gain."""
+    if decim == 1 and gain == 1.0:
+        return raw
+    x = np.frombuffer(raw, dtype=np.int16).astype(np.float32)
+    if decim != 1:
+        x = resample_poly(x, 1, decim)
+    if gain != 1.0:
+        x = x * gain
+    return np.clip(x, -32768, 32767).astype(np.int16).tobytes()
+
+
+def make_recognizer(model, mode):
+    if mode == "open":
+        rec = KaldiRecognizer(model, SAMPLE_RATE)
+    else:
+        grammar = GRAMMAR_FILLER if mode == "filler" else GRAMMAR_STRICT
+        rec = KaldiRecognizer(model, SAMPLE_RATE, grammar)
+    rec.SetWords(True)
+    return rec
+
+
+def run_replay(model, path, args, threshold, quiet=False, gain=None):
+    """Feed a recorded wav through the detector. Returns the number of hits."""
+    gain = args.gain if gain is None else gain
+    rec = make_recognizer(model, args.mode)
+    with wave.open(path, "rb") as w:
+        assert w.getframerate() == SAMPLE_RATE, f"{path} must be {SAMPLE_RATE} Hz mono"
+        hits = 0
+        while True:
+            data = w.readframes(SAMPLE_RATE // 4)
+            if not data:
+                break
+            data = to_model_rate(data, 1, gain)
+            if rec.AcceptWaveform(data):
+                matched, conf, text = score(json.loads(rec.Result()))
+                if text and not quiet and args.verbose:
+                    print(f"    heard: {text}   conf={conf:.2f}")
+                if matched and conf >= threshold:
+                    hits += 1
+                    if not quiet:
+                        print(f"    HIT   conf={conf:.2f}   {text}")
+        matched, conf, text = score(json.loads(rec.FinalResult()))
+        if matched and conf >= threshold:
+            hits += 1
+            if not quiet:
+                print(f"    HIT   conf={conf:.2f}   {text}")
+    return hits
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--device", type=int, default=None,
+                    help="input device index (see --list-devices)")
+    ap.add_argument("--device-name", default=None,
+                    help="select the input by name substring, e.g. 'Brio'. Preferred "
+                         "over --device: PortAudio indices move between reboots and "
+                         "replugs, exactly like /dev/ttyACM* does")
+    ap.add_argument("--capture-rate", type=int, default=CAPTURE_RATE,
+                    help="mic capture rate; decimated to 16 kHz for the model")
+    ap.add_argument("--model", default=DEFAULT_MODEL)
+    ap.add_argument("--sound", default=DEFAULT_SOUND)
+    ap.add_argument("--threshold", type=float, default=0.6,
+                    help="minimum mean word confidence to accept a match")
+    ap.add_argument("--cooldown", type=float, default=2.0,
+                    help="seconds to ignore further hits after a trigger")
+    ap.add_argument("--record", default=None,
+                    help="save the whole session as 16 kHz mono wav, for offline tuning")
+    ap.add_argument("--replay", default=None,
+                    help="run a recorded wav through the detector instead of the mic")
+    ap.add_argument("--gain", type=float, default=1.0,
+                    help="linear gain applied before the model. The Brio's hardware "
+                         "gain is nearly maxed, so this is the remaining lever for range")
+    ap.add_argument("--sweep", action="store_true",
+                    help="with --replay: report hit counts across a range of thresholds")
+    ap.add_argument("--sweep-gain", action="store_true",
+                    help="with --replay: report hit counts across a range of gains")
+    ap.add_argument("--save-hits", default=None,
+                    help="directory to write the audio of each trigger. This is the "
+                         "only way to find out what a false positive actually was")
+    ap.add_argument("--log", default=None,
+                    help="append triggers to this file. systemd --user journald is "
+                         "not persisted on this box, so stdout alone goes nowhere")
+    ap.add_argument("--list-devices", action="store_true")
+    ap.add_argument("--mode", choices=["strict", "filler", "open"], default="filler",
+                    help="decoder grammar. 'filler' adds competing words and is the "
+                         "default; 'strict' is phrase-or-unknown and over-fires; "
+                         "'open' is unrestricted, for calibration only")
+    ap.add_argument("--open", action="store_true", help="shorthand for --mode open")
+    ap.add_argument("--sweep-mode", action="store_true",
+                    help="with --replay: compare all three grammars on one recording")
+    ap.add_argument("--verbose", action="store_true")
+    args = ap.parse_args()
+    if args.open:
+        args.mode = "open"
+
+    if args.list_devices:
+        import sounddevice as sd
+        print(sd.query_devices())
+        return 0
+
+    SetLogLevel(-1)
+    if not os.path.isdir(args.model):
+        print(f"model not found: {args.model}", file=sys.stderr)
+        return 1
+    model = Model(args.model)
+
+    # ---- offline: replay a recording -------------------------------------
+    if args.replay:
+        if args.sweep:
+            print(f"threshold sweep over {args.replay}")
+            for t in [0.0, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]:
+                print(f"  threshold {t:.1f}  ->  {run_replay(model, args.replay, args, t, quiet=True)} hits")
+            return 0
+        if args.sweep_mode:
+            print(f"grammar comparison over {args.replay} "
+                  f"at threshold {args.threshold}, gain {args.gain}")
+            for m in ["strict", "filler", "open"]:
+                args.mode = m
+                n = run_replay(model, args.replay, args, args.threshold, quiet=True)
+                print(f"  {m:7s} ->  {n} hits")
+            return 0
+        if args.sweep_gain:
+            print(f"gain sweep over {args.replay} at threshold {args.threshold}")
+            for g in [1.0, 1.5, 2.0, 3.0, 4.0, 6.0, 8.0, 12.0]:
+                n = run_replay(model, args.replay, args, args.threshold, quiet=True, gain=g)
+                print(f"  gain {g:5.1f}x  ->  {n} hits")
+            return 0
+        n = run_replay(model, args.replay, args, args.threshold)
+        print(f"{n} hit(s) at threshold {args.threshold}")
+        return 0
+
+    # ---- live -------------------------------------------------------------
+    # Imported here rather than at module scope so --replay and --sweep work on
+    # a machine with no sound card at all.
+    import sounddevice as sd
+
+    if args.device_name:
+        match = [i for i, d in enumerate(sd.query_devices())
+                 if args.device_name.lower() in d["name"].lower()
+                 and d["max_input_channels"] > 0]
+        if not match:
+            print(f"no input device matching {args.device_name!r}", file=sys.stderr)
+            return 1
+        args.device = match[0]
+
+    decim = args.capture_rate // SAMPLE_RATE
+    if args.capture_rate % SAMPLE_RATE:
+        print(f"capture rate must be a multiple of {SAMPLE_RATE}", file=sys.stderr)
+        return 1
+
+    rec = make_recognizer(model, args.mode)
+    q = queue.Queue()
+
+    def cb(indata, frames, tinfo, status):
+        if status:
+            print(f"audio status: {status}", file=sys.stderr)
+        q.put(bytes(indata))
+
+    dev = sd.query_devices(args.device, "input") if args.device is not None else None
+    print(f"listening on: {dev['name'] if dev else 'default'}   "
+          f"phrase: {WAKE_PHRASE}   threshold: {args.threshold}", flush=True)
+
+    rectrack = None
+    if args.record:
+        rectrack = wave.open(args.record, "wb")
+        rectrack.setnchannels(1); rectrack.setsampwidth(2); rectrack.setframerate(SAMPLE_RATE)
+        print(f"recording to {args.record}", flush=True)
+
+    # 12 blocks x 0.25 s = 3 s of run-up kept, so a saved hit contains whatever
+    # was said before the trigger, not just the tail.
+    ring, ring_max = [], 12
+    last_fire, hits = 0.0, 0
+    block = int(args.capture_rate * BLOCK_SECONDS)
+
+    logfh = open(args.log, "a", buffering=1, encoding="utf-8") if args.log else None
+    if logfh:
+        logfh.write(f"\n=== started {datetime.now():%Y-%m-%d %H:%M:%S} "
+                    f"gain={args.gain} threshold={args.threshold} ===\n")
+
+    try:
+        with sd.RawInputStream(samplerate=args.capture_rate, blocksize=block,
+                               dtype="int16", channels=1, device=args.device,
+                               callback=cb):
+            while True:
+                data = to_model_rate(q.get(), decim, args.gain)
+                if rectrack:
+                    rectrack.writeframes(data)
+                ring.append(data)
+                if len(ring) > ring_max:
+                    ring.pop(0)
+
+                # Finals only. Partials fired mid-sentence during calibration.
+                if not rec.AcceptWaveform(data):
+                    continue
+                matched, conf, text = score(json.loads(rec.Result()))
+                if text and args.verbose:
+                    print(f"  heard: {text}   conf={conf:.2f}", flush=True)
+                if not (matched and conf >= args.threshold):
+                    continue
+
+                now = time.time()
+                if now - last_fire < args.cooldown:
+                    continue
+                last_fire, hits = now, hits + 1
+                stamp = f"{datetime.now():%Y-%m-%d %H:%M:%S}"
+                saved = ""
+                if args.save_hits:
+                    os.makedirs(args.save_hits, exist_ok=True)
+                    p = os.path.join(args.save_hits,
+                                     datetime.now().strftime("hit-%Y%m%d-%H%M%S.wav"))
+                    with wave.open(p, "wb") as w:
+                        w.setnchannels(1); w.setsampwidth(2); w.setframerate(SAMPLE_RATE)
+                        w.writeframes(b"".join(ring))
+                    saved = f"  audio={p}"
+                line = f"[{stamp}] TRIGGER #{hits}  conf={conf:.2f}  {text}{saved}"
+                print(line, flush=True)
+                if logfh:
+                    logfh.write(line + "\n")
+                play(args.sound)
+                rec.Reset()
+    finally:
+        if rectrack:
+            rectrack.close()
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        print("\nstopped")

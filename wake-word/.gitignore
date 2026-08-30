@@ -1,0 +1,5 @@
+# Runtime artifacts — these live on the Jetson and are regenerated, not source.
+# Recordings are hours of household audio; they must never land in the repo.
+*.wav
+hits/
+triggers.log
