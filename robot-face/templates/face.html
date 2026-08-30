@@ -12,6 +12,8 @@
       -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
     #face { position: fixed; inset: 0; }
     robot-face { position: absolute; inset: 0; }
+    @keyframes voicePulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+    body.pulse robot-face { animation: voicePulse 1.4s ease-in-out infinite; }
   </style>
 </head>
 <body>
@@ -33,12 +35,35 @@
 
     let lastVoice = 'idle';
 
+    // Colours the face takes on during a voice session. `connecting` and
+    // `error` are the two that must be legible from across the room — they are
+    // the states where you would otherwise be staring at a face wondering what
+    // happened. The rest are ambient feedback.
+    const VOICE_LOOK = {
+      idle:       null,                                  // fall back to normal state
+      connecting: { color: '#FFAE1E', emotion: 'thinking',  pulse: true  },
+      listening:  { color: '#2AD4FF', emotion: 'curious',   pulse: false },
+      thinking:   { color: '#FFD34D', emotion: 'thinking',  pulse: false },
+      speaking:   { color: '#37D67A', emotion: 'happy',     pulse: false },
+      error:      { color: '#FF3B30', emotion: 'sad',       pulse: false },
+    };
+
     function apply(state) {
       if (!state) return;
-      if (state.mood)  face.setAttribute('emotion', state.mood);
-      if (state.color) face.setAttribute('color', state.color);
 
       const v = state.voice || 'idle';
+      const look = VOICE_LOOK[v];
+
+      if (look) {
+        face.setAttribute('color', look.color);
+        face.setAttribute('emotion', look.emotion);
+        document.body.classList.toggle('pulse', !!look.pulse);
+      } else {
+        document.body.classList.remove('pulse');
+        if (state.mood)  face.setAttribute('emotion', state.mood);
+        if (state.color) face.setAttribute('color', state.color);
+      }
+
       if (v !== lastVoice) {
         lastVoice = v;
         if (v === 'connecting') joinVoice();
