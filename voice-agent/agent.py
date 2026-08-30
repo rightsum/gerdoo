@@ -56,7 +56,14 @@ async def entrypoint(ctx: JobContext):
         ),
         tts=elevenlabs.TTS(
             api_key=os.environ["ELEVEN_API_KEY"],
-            model="eleven_multilingual_v2",
+            # Voice and model come from the environment so changing either is
+            # an .env edit and a restart, never a code change. `make voices`
+            # lists the ids available on your account.
+            voice_id=os.environ["ELEVEN_VOICE_ID"],
+            # Multilingual by default: the household switches between Persian
+            # and English mid-conversation, and the turbo/monolingual models
+            # mangle Farsi.
+            model=os.environ.get("ELEVEN_TTS_MODEL", "eleven_multilingual_v2"),
         ),
         vad=silero.VAD.load(),
     )
