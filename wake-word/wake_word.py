@@ -33,6 +33,7 @@ import queue
 import subprocess
 import sys
 import time
+import urllib.request
 import wave
 from datetime import datetime
 
@@ -99,6 +100,45 @@ def play(path):
         except FileNotFoundError:
             continue
     print(f"no player available for {path}", file=sys.stderr)
+
+
+def start_voice_session(base_url, timeout=5.0):
+    """Ask Flask to start a session. Returns True if it accepted."""
+    try:
+        req = urllib.request.Request(f"{base_url}/api/voice/wake", method="POST")
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status == 200
+    except Exception as e:
+        print(f"  voice wake failed: {e}", file=sys.stderr)
+        return False
+
+
+def voice_state(base_url, timeout=3.0):
+    try:
+        with urllib.request.urlopen(f"{base_url}/api/voice/status", timeout=timeout) as r:
+            return json.loads(r.read()).get("voice", "idle")
+    except Exception:
+        return "idle"      # unreachable Flask must not wedge the detector
+
+
+def wait_for_session_end(base_url, poll_s=1.0, max_s=600.0):
+    """
+    Block until the session is over.
+
+    The detector must not listen during a conversation, or it hears the
+    conversation and re-triggers on it. Polling rather than a push because this
+    is a plain audio loop with no server in it; one request a second costs
+    nothing. max_s is a backstop so a wedged session cannot deafen the robot
+    permanently.
+    """
+    start = time.time()
+    while time.time() - start < max_s:
+        if voice_state(base_url) == "idle":
+            return True
+        time.sleep(poll_s)
+    print("  session did not end within the backstop; resuming anyway",
+          file=sys.stderr)
+    return False
 
 
 def score(result):
@@ -204,6 +244,10 @@ def main():
     ap.add_argument("--log", default=None,
                     help="append triggers to this file. systemd --user journald is "
                          "not persisted on this box, so stdout alone goes nowhere")
+    ap.add_argument("--voice-url", default=None,
+                    help="base URL of the robot-face Flask app, e.g. "
+                         "http://localhost:8080. When set, a trigger starts a "
+                         "LiveKit session and the detector pauses until it ends")
     ap.add_argument("--list-devices", action="store_true")
     ap.add_argument("--mode", choices=["strict", "filler", "open"], default="filler",
                     help="decoder grammar. 'filler' adds competing words and is the "
@@ -342,6 +386,22 @@ def main():
                     logfh.write(line + "\n")
                 play(args.sound)
                 rec.Reset()
+
+                if args.voice_url:
+                    if start_voice_session(args.voice_url):
+                        print("  session started; detector paused", flush=True)
+                        if logfh:
+                            logfh.write("  session started; detector paused\n")
+                        wait_for_session_end(args.voice_url)
+                        print("  session ended; listening again", flush=True)
+                        if logfh:
+                            logfh.write("  session ended; listening again\n")
+                        # Audio queued during the conversation is stale and
+                        # would be decoded as if it had just been spoken.
+                        with q.mutex:
+                            q.queue.clear()
+                        rec.Reset()
+                        last_fire = time.time()
     finally:
         if rectrack:
             rectrack.close()

@@ -22,6 +22,7 @@ ExecStart=/usr/bin/python3 %h/wake-word/wake_word.py \
     --threshold 0.5 \
     --cooldown 3.0 \
     --sound %h/wake-word/sounds/janam.mp3 \
+    --voice-url http://localhost:8080 \
     --log %h/wake-word/triggers.log \
     --save-hits %h/wake-word/hits \
     --record %h/wake-word/ambient.wav
