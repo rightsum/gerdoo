@@ -25,6 +25,7 @@ from werkzeug.security import check_password_hash
 import gesture
 import lidar
 from camera import camera, CameraError
+import voice
 
 
 def local_only():
@@ -204,6 +205,56 @@ def api_events():
             "Connection": "keep-alive",
         },
     )
+
+
+# ---- Voice sessions ----
+# The room is fixed: one robot, one conversation. The agent on the Mac is
+# auto-dispatched when this room is created, so joining is all the robot does.
+VOICE_ROOM = "gerdoo"
+
+
+def _voice_cfg():
+    cfg = load_config()
+    return (
+        cfg.get("livekit_url", "ws://mac-studio.local:7880"),
+        cfg.get("livekit_api_key", "devkey"),
+        cfg.get("livekit_api_secret", "secret-at-least-32-characters-long-x"),
+    )
+
+
+def _set_voice(state):
+    """Update voice state and push it to the face over the existing SSE."""
+    s = load_state()
+    s["voice"] = state
+    s["updated"] = time.time()
+    save_state(s)
+    broadcast(s)
+    return s
+
+
+@app.route("/api/voice/wake", methods=["POST"])
+def api_voice_wake():
+    """Called by the wake-word service. Mints a token and tells the face to join."""
+    url, key, secret = _voice_cfg()
+    token = voice.mint_token(VOICE_ROOM, "face", key, secret)
+    _set_voice("connecting")
+    return jsonify({"url": url, "token": token, "room": VOICE_ROOM})
+
+
+@app.route("/api/voice/state", methods=["POST"])
+def api_voice_state():
+    """Called by the browser as the session progresses."""
+    data = request.get_json(force=True, silent=True) or {}
+    state = data.get("voice")
+    if not voice.is_valid_state(state):
+        return jsonify({"error": "unknown voice state", "got": state}), 400
+    return jsonify(_set_voice(state))
+
+
+@app.route("/api/voice/status")
+def api_voice_status():
+    """Polled by the wake-word service so it knows when to resume listening."""
+    return jsonify({"voice": load_state().get("voice", "idle")})
 
 
 # ---- Auth ----
