@@ -114,29 +114,50 @@ def start_voice_session(base_url, timeout=5.0):
 
 
 def voice_state(base_url, timeout=3.0):
+    """Current voice state, or None if Flask could not be reached."""
     try:
         with urllib.request.urlopen(f"{base_url}/api/voice/status", timeout=timeout) as r:
             return json.loads(r.read()).get("voice", "idle")
     except Exception:
-        return "idle"      # unreachable Flask must not wedge the detector
+        # None, not "idle". Treating an unreachable Flask as "session over"
+        # would resume the detector mid-conversation on a single blip — the
+        # exact thing pausing exists to prevent.
+        return None
 
 
-def wait_for_session_end(base_url, poll_s=1.0, max_s=600.0):
+# How long a session may run before the detector resumes regardless. Long
+# enough for a real conversation, short enough that a browser which never
+# joined does not leave the robot deaf to its own name for ages.
+SESSION_MAX_S = 180.0
+
+# A session is only considered over after this many consecutive idle reads.
+# One reading is not enough: a transient failure or a race against the browser's
+# first state report would resume the detector during a live conversation.
+IDLE_READS_TO_END = 3
+
+
+def wait_for_session_end(base_url, poll_s=1.0, max_s=SESSION_MAX_S):
     """
     Block until the session is over.
 
     The detector must not listen during a conversation, or it hears the
     conversation and re-triggers on it. Polling rather than a push because this
     is a plain audio loop with no server in it; one request a second costs
-    nothing. max_s is a backstop so a wedged session cannot deafen the robot
-    permanently.
+    nothing.
     """
     start = time.time()
+    idle_runs = 0
     while time.time() - start < max_s:
-        if voice_state(base_url) == "idle":
-            return True
+        state = voice_state(base_url)
+        if state == "idle":
+            idle_runs += 1
+            if idle_runs >= IDLE_READS_TO_END:
+                return True
+        elif state is not None:
+            idle_runs = 0          # a real non-idle state resets the count
+        # state is None (unreachable): hold the count, neither end nor reset
         time.sleep(poll_s)
-    print("  session did not end within the backstop; resuming anyway",
+    print(f"  session ran past the {max_s:.0f}s backstop; resuming anyway",
           file=sys.stderr)
     return False
 

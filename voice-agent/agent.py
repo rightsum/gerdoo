@@ -62,6 +62,7 @@ async def entrypoint(ctx: JobContext):
     )
 
     timer = SilenceTimer(timeout_s=SILENCE_TIMEOUT_S, now=time.monotonic())
+    _background: set[asyncio.Task] = set()
 
     @session.on("user_input_transcribed")
     def _on_user_speech(ev):
@@ -83,7 +84,11 @@ async def entrypoint(ctx: JobContext):
                 )
                 ctx.shutdown(reason="closing phrase")
 
-            _end_task = asyncio.create_task(_say_farewell_and_end())
+            # Held in a set: asyncio keeps only weak references to tasks, so a
+            # bare local can be collected mid-flight.
+            task = asyncio.create_task(_say_farewell_and_end())
+            _background.add(task)
+            task.add_done_callback(_background.discard)
 
     async def _watch_silence():
         while True:
@@ -103,12 +108,22 @@ async def entrypoint(ctx: JobContext):
         room_input_options=RoomInputOptions(delete_room_on_close=True),
     )
 
-    _watch_task = asyncio.create_task(_watch_silence())
+    watch = asyncio.create_task(_watch_silence())
+    _background.add(watch)
+    watch.add_done_callback(_background.discard)
 
+    # generate_reply awaits playout, so this returns only once the greeting has
+    # finished speaking.
     await session.generate_reply(
         instructions="Greet the user briefly by name — they are the user — and "
                      "ask what they need. One short sentence."
     )
+
+    # The user could not have spoken before now — the robot was talking. Start
+    # their 30 s window here, not at connect time, or a slow first LLM+TTS round
+    # trip eats most of the budget and the session can time out before the
+    # conversation has begun.
+    timer.mark_user_spoke(now=time.monotonic())
 
 
 if __name__ == "__main__":
