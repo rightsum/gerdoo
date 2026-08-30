@@ -7,12 +7,20 @@ when the room is created. That means the robot only has to join a room; no
 cross-machine RPC is needed to start a conversation.
 """
 
+import asyncio
 import logging
 import os
 import time
 
 from dotenv import load_dotenv
-from livekit.agents import Agent, AgentSession, JobContext, WorkerOptions, cli
+from livekit.agents import (
+    Agent,
+    AgentSession,
+    JobContext,
+    RoomInputOptions,
+    WorkerOptions,
+    cli,
+)
 from livekit.plugins import elevenlabs, openai, silero
 
 from session_rules import SilenceTimer, is_closing_phrase
@@ -66,11 +74,18 @@ async def entrypoint(ctx: JobContext):
         log.info("user: %s", text)
         if is_closing_phrase(text):
             log.info("closing phrase heard, ending session")
-            session.interrupt()
-            ctx.shutdown(reason="closing phrase")
+
+            async def _say_farewell_and_end():
+                session.interrupt()
+                await session.generate_reply(
+                    instructions="Say a one-sentence warm farewell in the "
+                                 "user's language, then nothing more.",
+                )
+                ctx.shutdown(reason="closing phrase")
+
+            _end_task = asyncio.create_task(_say_farewell_and_end())
 
     async def _watch_silence():
-        import asyncio
         while True:
             await asyncio.sleep(1.0)
             if timer.expired(now=time.monotonic()):
@@ -79,10 +94,16 @@ async def entrypoint(ctx: JobContext):
                 ctx.shutdown(reason="silence timeout")
                 return
 
-    await session.start(agent=Agent(instructions=SYSTEM_PROMPT), room=ctx.room)
+    await session.start(
+        agent=Agent(instructions=SYSTEM_PROMPT),
+        room=ctx.room,
+        # The browser only sees "idle" via its Disconnected handler, so the
+        # room must be deleted when this session ends — otherwise the face
+        # stays connected forever and the wake word never resumes.
+        room_input_options=RoomInputOptions(delete_room_on_close=True),
+    )
 
-    import asyncio
-    asyncio.create_task(_watch_silence())
+    _watch_task = asyncio.create_task(_watch_silence())
 
     await session.generate_reply(
         instructions="Greet the user briefly by name — they are the user — and "
