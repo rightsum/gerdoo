@@ -1369,6 +1369,32 @@ being at the top of its range (54 dB / 72). The unit re-applies it in `ExecStart
 ⚠️ **`paplay` accepts an mp3 path and silently plays nothing.** That is indistinguishable
 from the detector not firing. Use `mpg123` for compressed audio.
 
+### 🔊 Audio routing — read before touching anything that captures or plays
+
+The Brio (capture) and the USB speaker (playback) are **two separate USB devices with
+independent clocks**, and that single fact drives everything below. Full write-up in
+[`logs/014`](logs/014-2026-09-01-livekit-voice-agent.md).
+
+`wake-word/audio-setup.sh` puts it all back into a known state and runs on every
+wake-word service start. Run it by hand whenever audio misbehaves — it prints what it
+found.
+
+| Trap | What it looks like |
+|---|---|
+| **Two processes, one microphone.** `wake_word.py` opens the Brio through raw ALSA and holds `/dev/snd/pcmC2D0c` | Firefox's `getUserMedia` succeeds and captures **silence**. Everything looks connected. The detector now releases the device during a call |
+| **`module-stream-restore` overrides the default device per application** | Setting the default source/sink does not move Firefox. It stays on whatever it used last, so the echo canceller is bypassed. It is unloaded |
+| **Clock drift between the two devices** | Echo cancellation works for ~30 s then collapses and the robot transcribes its own voice. Fixed with `adjust_time=1 adjust_threshold=1` — resync every second instead of every ten. `adjust_threshold` must be an **integer** or the module fails to load |
+| **Replugging the USB hub** | Mixer levels reset (speaker to 15%) and the default source moves to the **speaker's own mic**. The robot goes deaf while looking fine |
+| **Card indices move on replug** | Resolve by name (`B500`, `Device`), never `-c 2`. Third time this project has been bitten by addressing USB hardware by number |
+
+⚠️ **Echo cancellation is `module-echo-cancel` in PulseAudio, not the browser.** Browser
+AEC cannot work across two devices with no shared clock. Both directions must route
+through `gerdoo_aec_source` / `gerdoo_aec_sink` — the canceller can only subtract what it
+knows was played.
+
+⚠️ **The speaker has its own microphone.** It is in the same clock domain as the speaker,
+so AEC would be trivial — but it is a poor microphone and was rejected. The Brio stays.
+
 ---
 
 ## 🏎️ RC Car / Robot Wheels & Parts
