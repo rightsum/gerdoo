@@ -36,18 +36,35 @@
       speed="1"></robot-face>
   </div>
 
-  {% if renderer == '2d' %}
   <div id="voice-caption"></div>
   <!-- Agent audio elements are appended here. A detached <audio> does not
-       autoplay in Firefox, which is what the kiosk runs. -->
+       autoplay in Firefox, which is what the kiosk runs. Must live OUTSIDE the
+       renderer branch — it is needed by both. -->
   <div id="voice-audio" hidden></div>
+
+  {% if renderer == '2d' %}
   <script src="{{ url_for('static', filename='robot-face.js') }}"></script>
   {% else %}
   <script src="{{ url_for('static', filename='robot-face-gl.js') }}"></script>
   {% endif %}
   <script src="{{ url_for('static', filename='livekit-client.umd.min.js') }}"></script>
   <script>
+    // Breadcrumbs to the server. A kiosk has no console, so anything that goes
+    // wrong here is otherwise invisible.
+    function jslog(msg) {
+      try {
+        fetch('/api/voice/log', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ msg: String(msg).slice(0, 400) }),
+        });
+      } catch {}
+    }
+    window.onerror = (m, src, line, col) => jslog(`JS ERROR ${m} @${line}:${col}`);
+    window.onunhandledrejection = (e) => jslog(`UNHANDLED ${e.reason && e.reason.message || e.reason}`);
+    jslog(`page loaded; LivekitClient=${typeof LivekitClient}`);
+
     const face = document.querySelector('robot-face');
+    jslog(`A: face=${face ? 'found' : 'NULL'}`);
 
     let lastVoice = 'idle';
 
@@ -64,7 +81,9 @@
       error:      { color: '#FF3B30', emotion: 'sad',       pulse: false, caption: "couldn't connect" },
     };
 
+    jslog('B: before caption lookup');
     const caption = document.getElementById('voice-caption');
+    if (!caption) jslog('MISSING #voice-caption — captions will not render');
 
     function setCaption(text) {
       caption.textContent = text || '';
@@ -90,6 +109,7 @@
       }
 
       if (v !== lastVoice) {
+        jslog(`voice ${lastVoice} -> ${v}`);
         lastVoice = v;
         if (v === 'connecting') joinVoice();
         if (v === 'idle') leaveVoice();
@@ -101,21 +121,29 @@
     // Jetson for one reason: the speaker sits beside the microphone, and
     // WebRTC gives us echo cancellation for free. Without it the robot
     // transcribes its own voice and talks to itself.
+    jslog('C: before voice session section');
     let room = null;
     const audioSink = document.getElementById('voice-audio');
 
-    async function report(voiceState) {
+    async function report(voiceState, detail) {
       try {
         await fetch('/api/voice/state', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ voice: voiceState }),
+          body: JSON.stringify({ voice: voiceState, detail: detail || '' }),
         });
       } catch (e) { console.warn('voice state report failed:', e); }
     }
 
     async function joinVoice() {
-      if (room) return;                       // already in a session
+      jslog(`joinVoice called; room=${room ? 'present' : 'null'}`);
+      if (room) {
+        // Already in a session. Something re-set the state to `connecting`;
+        // correct it rather than returning and leaving the face frozen there.
+        jslog('already connected — re-reporting listening');
+        report('listening');
+        return;
+      }
       try {
         const res = await fetch('/api/voice/wake', { method: 'POST' });
         const { url, token } = await res.json();
@@ -150,8 +178,21 @@
         room.on(LivekitClient.RoomEvent.ParticipantAttributesChanged, (changed) => {
           const s = changed['lk.agent.state'];
           if (!s) return;
-          if (s === 'thinking')       report('thinking');
-          else if (s === 'speaking')  report('speaking');
+
+          // Half-duplex: mute the microphone while the robot is talking.
+          //
+          // Browser echo cancellation cannot help here — the speaker and the
+          // Brio are two SEPARATE USB devices, so there is no shared clock for
+          // AEC to correlate. Without this the mic hears the robot, Scribe
+          // transcribes it, and the model holds a conversation with itself.
+          //
+          // The cost is that you cannot interrupt it mid-sentence. That is a
+          // real loss, and the alternative is it talking over itself forever.
+          // The microphone is never touched mid-call. Echo is handled agent-side
+          // (turn_handling interruption disabled); muting the track here churned
+          // the audio path and silently killed the call after a few turns.
+          if (s === 'speaking')       report('speaking');
+          else if (s === 'thinking')  report('thinking');
           else if (s === 'listening' || s === 'idle') report('listening');
         });
         room.on(LivekitClient.RoomEvent.Disconnected, () => {
@@ -159,14 +200,23 @@
           report('idle');
         });
 
-        await room.connect(url, token);
-        await room.localParticipant.setMicrophoneEnabled(true);
+        const limit = (p, ms, what) => Promise.race([
+          p,
+          new Promise((_, rej) => setTimeout(() => rej(new Error(what + ' timed out after ' + ms + 'ms')), ms)),
+        ]);
+
+        jslog(`connecting to ${url}`);
+        await limit(room.connect(url, token), 15000, 'room.connect');
+        jslog('connected; enabling mic');
+        await limit(room.localParticipant.setMicrophoneEnabled(true), 10000, 'microphone');
+        jslog('mic enabled');
         report('listening');
       } catch (e) {
         if (room) { try { await room.disconnect(); } catch {} }
         room = null;
-        report('error');
-        setTimeout(() => report('idle'), 3000);
+        jslog(`joinVoice FAILED: ${(e && e.message) || e}`);
+        report('error', String((e && e.message) || e));
+        setTimeout(() => report('idle'), 5000);
       }
     }
 
@@ -179,18 +229,24 @@
 
     // Live updates via Server-Sent Events, with automatic reconnect if the
     // backend restarts or the network blips.
+    jslog('D: before SSE section');
     let es;
     function connect() {
       es = new EventSource('/api/events');
-      es.onmessage = (ev) => { try { apply(JSON.parse(ev.data)); } catch {} };
+      es.onmessage = (ev) => {
+        try { apply(JSON.parse(ev.data)); }
+        catch (e) { jslog(`apply() threw: ${(e && e.message) || e}`); }
+      };
       es.onerror = () => { es.close(); setTimeout(connect, 2000); };
     }
+    jslog('E: calling connect()');
     connect();
+    jslog('F: connect() returned');
 
     // Belt-and-suspenders: if the stream is ever silent, poll occasionally.
     setInterval(async () => {
       try { apply(await (await fetch('/api/state', { cache: 'no-store' })).json()); }
-      catch {}
+      catch (e) { jslog(`poll apply() threw: ${(e && e.message) || e}`); }
     }, 30000);
   </script>
 </body>

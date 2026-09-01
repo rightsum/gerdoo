@@ -29,7 +29,7 @@ PORT := 7880
 # CLI pick up credentials without them ever appearing on a command line.
 LOADENV := set -a; . ./.env; set +a;
 
-.PHONY: help check up down restart server agent agent-dev status logs join test voices clean
+.PHONY: help check up down restart server agent agent-dev status logs console join test voices clean
 
 help:
 	@echo "Gerdoo voice agent"
@@ -38,7 +38,8 @@ help:
 	@echo "  make up        start the LiveKit server and the agent"
 	@echo "  make status    show what is running"
 	@echo "  make logs      follow both logs (ctrl-C to stop watching)"
-	@echo "  make join      hold a conversation from this Mac, no robot needed"
+	@echo "  make console   talk to the agent using this Mac's mic and speakers"
+	@echo "  make join      open LiveKit Meet in a browser, joined to the room"
 	@echo "  make voices    list the ElevenLabs voices on your account"
 	@echo "  make agent-dev run the agent in the foreground with hot reload"
 	@echo "  make test      run the unit tests"
@@ -145,11 +146,23 @@ status:
 logs:
 	@tail -f $(SERVER_LOG) $(AGENT_LOG)
 
-# Talk to the agent from this Mac. Proves STT, the LLM and TTS all work before
-# the robot is involved at all — if this fails, the Jetson is not the problem.
+# The pipeline test. Runs a private agent session against this Mac's own mic
+# and speakers — no server, no room, no robot. If STT, the LLM or TTS is
+# misconfigured, it fails here, where nothing else can be blamed.
+#
+# Ctrl-C to leave. This is a separate agent instance; the one started by
+# `make up` keeps running and is unaffected.
+console:
+	@$(LOADENV) python3 agent.py console
+
+# The room test. Opens LiveKit Meet in a browser, joined to the same room the
+# robot uses — the closest thing to the real path without the robot.
+#
+# `lk` cannot publish a live microphone (no --publish-mic flag exists; it only
+# publishes files), so a browser is the only way to speak into a room from here.
 join:
 	@$(LOADENV) LIVEKIT_URL=ws://localhost:$(PORT) \
-	  lk room join --identity tester --publish-mic gerdoo
+	  lk room join --identity tester --open meet gerdoo
 
 voices:
 	@python3 list_voices.py

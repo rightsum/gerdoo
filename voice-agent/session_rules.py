@@ -9,7 +9,8 @@ microphone, so it lives here where it can be tested in milliseconds.
 # Matched case-insensitively as substrings of the final transcript. A plain
 # substring match rather than an LLM intent call: deterministic, free, and a
 # chatty model cannot talk itself out of ending the session.
-CLOSING_PHRASES = ("خداحافظ", "khodahafez", "goodbye")
+CLOSING_PHRASES = ("خداحافظ", "khodahafez", "goodbye", "bye bye", "bye-bye",
+                   "خدانگهدار")
 
 
 def is_closing_phrase(text: str) -> bool:
