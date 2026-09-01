@@ -56,3 +56,7 @@ delegated, so putting the Teensy in front of it only adds a middleman.
 
 Teensy healthy on micro-ROS · lidar publishing `/scan` at 10 Hz · control panel live.
 Power tree and wiring still ahead — see `ACTION-PLAN.md`.
+
+## License
+
+[MIT](LICENSE) — hardware docs, firmware and software all under it.
