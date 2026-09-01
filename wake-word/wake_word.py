@@ -79,7 +79,7 @@ CAPTURE_RATE = 48000
 BLOCK_SECONDS = 0.25
 
 
-def play(path):
+def play(path, wait=False):
     """
     Fire the response sound without blocking the audio loop.
 
@@ -94,8 +94,14 @@ def play(path):
         players = (["paplay", path], ["aplay", "-q", path])
     for player in players:
         try:
-            subprocess.Popen(player, env=env,
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            proc = subprocess.Popen(player, env=env,
+                                    stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL)
+            if wait:
+                try:
+                    proc.wait(timeout=15)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
             return
         except FileNotFoundError:
             continue
@@ -125,10 +131,19 @@ def voice_state(base_url, timeout=3.0):
         return None
 
 
-# How long a session may run before the detector resumes regardless. Long
-# enough for a real conversation, short enough that a browser which never
-# joined does not leave the robot deaf to its own name for ages.
-SESSION_MAX_S = 180.0
+# Absolute cap on a call. Only a runaway session should ever reach this — a
+# real conversation is allowed to run as long as it likes, because the detector
+# holds the microphone and reclaiming it mid-sentence kills the call.
+SESSION_MAX_S = 3600.0
+
+# A session that never gets past "connecting" is wedged: the browser failed to
+# join and nobody is talking to anyone. Give up on those quickly, so the robot
+# is not left deaf to its own name.
+CONNECTING_MAX_S = 45.0
+
+# Silence after the chime before the session starts, so the tail of the sound
+# does not reach the microphone as the browser joins.
+CHIME_SETTLE_S = 0.4
 
 # A session is only considered over after this many consecutive idle reads.
 # One reading is not enough: a transient failure or a race against the browser's
@@ -147,6 +162,7 @@ def wait_for_session_end(base_url, poll_s=1.0, max_s=SESSION_MAX_S):
     """
     start = time.time()
     idle_runs = 0
+    connecting_since = None
     while time.time() - start < max_s:
         state = voice_state(base_url)
         if state == "idle":
@@ -155,9 +171,19 @@ def wait_for_session_end(base_url, poll_s=1.0, max_s=SESSION_MAX_S):
                 return True
         elif state is not None:
             idle_runs = 0          # a real non-idle state resets the count
+            if state == "connecting":
+                connecting_since = connecting_since or time.time()
+                if time.time() - connecting_since > CONNECTING_MAX_S:
+                    print(f"  stuck on 'connecting' for {CONNECTING_MAX_S:.0f}s; "
+                          f"giving up and listening again", file=sys.stderr)
+                    return False
+            else:
+                # An actual conversation. However long it runs, do not take the
+                # microphone back — that ends the call mid-sentence.
+                connecting_since = None
         # state is None (unreachable): hold the count, neither end nor reset
         time.sleep(poll_s)
-    print(f"  session ran past the {max_s:.0f}s backstop; resuming anyway",
+    print(f"  session ran past the {max_s / 60:.0f}min cap; resuming anyway",
           file=sys.stderr)
     return False
 
@@ -366,10 +392,28 @@ def main():
         logfh.write(f"\n=== started {datetime.now():%Y-%m-%d %H:%M:%S} "
                     f"gain={args.gain} threshold={args.threshold} ===\n")
 
-    try:
-        with sd.RawInputStream(samplerate=args.capture_rate, blocksize=block,
+    def open_mic():
+        st = sd.RawInputStream(samplerate=args.capture_rate, blocksize=block,
                                dtype="int16", channels=1, device=args.device,
-                               callback=cb):
+                               callback=cb)
+        st.start()
+        return st
+
+    def close_mic(st):
+        # The Brio is a single hardware capture device and this process holds it
+        # through raw ALSA. While it is open, Firefox's getUserMedia succeeds but
+        # receives SILENCE — the voice agent then sees the user as "away" and
+        # never answers. Releasing it for the duration of a call is the only way
+        # both can use the microphone.
+        try:
+            st.stop()
+            st.close()
+        except Exception as e:
+            print(f"  could not release the mic: {e}", file=sys.stderr)
+
+    stream = open_mic()
+    try:
+        if True:
             while True:
                 data = to_model_rate(q.get(), decim, args.gain)
                 if rectrack:
@@ -405,16 +449,40 @@ def main():
                 print(line, flush=True)
                 if logfh:
                     logfh.write(line + "\n")
-                play(args.sound)
+                # Wait for the chime to FINISH before handing over to LiveKit.
+                # The browser joins with its microphone already live, so a chime
+                # still playing out of the speaker becomes the first thing the
+                # agent transcribes — it hears itself say "janam" and answers it.
+                play(args.sound, wait=bool(args.voice_url))
+                if args.voice_url:
+                    time.sleep(CHIME_SETTLE_S)   # let the speaker tail decay
                 rec.Reset()
 
                 if args.voice_url:
-                    if start_voice_session(args.voice_url):
-                        print("  session started; detector paused", flush=True)
+                    already = voice_state(args.voice_url)
+                    if already not in (None, "idle"):
+                        print(f"  session already active ({already}); not re-triggering",
+                              flush=True)
                         if logfh:
-                            logfh.write("  session started; detector paused\n")
+                            logfh.write(f"  session already active ({already}); "
+                                        f"not re-triggering\n")
+                        close_mic(stream)
                         wait_for_session_end(args.voice_url)
-                        print("  session ended; listening again", flush=True)
+                        stream = open_mic()
+                        with q.mutex:
+                            q.queue.clear()
+                        rec.Reset()
+                        last_fire = time.time()
+                    elif start_voice_session(args.voice_url):
+                        print("  session started; mic released, detector paused",
+                              flush=True)
+                        if logfh:
+                            logfh.write("  session started; mic released\n")
+                        close_mic(stream)
+                        wait_for_session_end(args.voice_url)
+                        stream = open_mic()
+                        print("  session ended; mic reacquired, listening again",
+                              flush=True)
                         if logfh:
                             logfh.write("  session ended; listening again\n")
                         # Audio queued during the conversation is stale and
@@ -424,6 +492,11 @@ def main():
                         rec.Reset()
                         last_fire = time.time()
     finally:
+        try:
+            stream.stop()
+            stream.close()
+        except Exception:
+            pass
         if rectrack:
             rectrack.close()
 
