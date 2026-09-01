@@ -5,8 +5,8 @@ import pytest
 
 import voice
 
-KEY = "devkey"
-SECRET = "secret-at-least-32-characters-long-x"
+KEY = "test-key-not-real"
+SECRET = "test-secret-not-real-but-at-least-32-characters"
 
 
 def decode(token):

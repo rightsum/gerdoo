@@ -3,3 +3,6 @@ __pycache__/
 # Runtime files (device-specific: contains password hash, secret key, live mood)
 config.json
 state.json
+
+# Personal — the robot's address. Copy from deploy.env.example.
+deploy/deploy.env

@@ -59,6 +59,11 @@ check:
 	    else echo "set      $$v"; fi; \
 	  done; \
 	fi; \
+	if [ ! -f livekit.yaml ]; then \
+	  echo "MISSING  livekit.yaml — run: cp livekit.yaml.example livekit.yaml"; ok=0; \
+	else \
+	  echo "found    livekit.yaml"; \
+	fi; \
 	command -v livekit-server >/dev/null && echo "found    livekit-server" \
 	  || { echo "MISSING  livekit-server — brew install livekit"; ok=0; }; \
 	command -v lk >/dev/null && echo "found    lk" \

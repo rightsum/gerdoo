@@ -50,7 +50,7 @@ These are keyed on each device's own serial number, so they also disambiguate bo
 > The panel is **owned by the kiosk**, full-screen. It is not a spare terminal — do not expect a usable desktop there.
 
 ---
-> Account: the user · Region: DE/EUR · Date range: 12 Nov 2025 – 24 Jun 2026
+> Account: yours · Region: DE/EUR · Date range: 12 Nov 2025 – 24 Jun 2026
 > 56 orders total (46 completed/delivering + 4 cancelled + 6 older orders)
 > Each item includes product link and technical specifications
 

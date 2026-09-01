@@ -3,3 +3,6 @@ __pycache__/
 *.pyc
 run/
 logs/
+
+# Real server config — holds the real key pair. The example is what ships.
+livekit.yaml

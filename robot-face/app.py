@@ -224,9 +224,12 @@ VOICE_ROOM = "gerdoo"
 def _voice_cfg():
     cfg = load_config()
     return (
-        cfg.get("livekit_url", "ws://mac-studio.local:7880"),
-        cfg.get("livekit_api_key", "devkey"),
-        cfg.get("livekit_api_secret", "secret-at-least-32-characters-long-x"),
+        # Real key pair lives in the robot's config.json (gitignored) — see
+        # voice-agent/livekit.yaml.example. These placeholders are inert; set
+        # the real values there: livekit_url, livekit_api_key, livekit_api_secret.
+        cfg.get("livekit_url", "ws://localhost:7880"),
+        cfg.get("livekit_api_key", ""),
+        cfg.get("livekit_api_secret", ""),
     )
 
 

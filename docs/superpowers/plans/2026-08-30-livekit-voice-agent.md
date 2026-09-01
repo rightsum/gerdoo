@@ -58,7 +58,7 @@ Gets a server running and proves a room can be joined, before any agent code exi
 
 **Interfaces:**
 - Consumes: nothing
-- Produces: a server at `ws://mac-studio.local:7880`, and the key/secret pair `devkey` / `secret-at-least-32-characters-long-x` used by every later task
+- Produces: a server at `ws://mac-studio.local:7880`, and the key/secret pair from `livekit.yaml` used by every later task
 
 - [ ] **Step 1: Write the server config**
 
@@ -81,7 +81,7 @@ rtc:
 # Development keys. This server is LAN-only and never exposed to the
 # internet. If that changes, these must be replaced.
 keys:
-  devkey: secret-at-least-32-characters-long-x
+  yourkey: <your-api-secret>
 
 logging:
   level: info
@@ -94,8 +94,8 @@ Create `voice-agent/.env.example`:
 ```bash
 # LiveKit — shared with the Jetson's Flask app, which signs join tokens.
 LIVEKIT_URL=ws://mac-studio.local:7880
-LIVEKIT_API_KEY=devkey
-LIVEKIT_API_SECRET=secret-at-least-32-characters-long-x
+LIVEKIT_API_KEY=<your-api-key>
+LIVEKIT_API_SECRET=<your-api-secret>
 
 # ElevenLabs — STT and TTS. Never leaves the Mac.
 ELEVEN_API_KEY=
@@ -125,8 +125,8 @@ In a second terminal:
 
 ```bash
 export LIVEKIT_URL=ws://localhost:7880
-export LIVEKIT_API_KEY=devkey
-export LIVEKIT_API_SECRET=secret-at-least-32-characters-long-x
+export LIVEKIT_API_KEY=<your-api-key>
+export LIVEKIT_API_SECRET=<your-api-secret>
 lk room create gerdoo
 lk room list
 ```
@@ -408,7 +408,8 @@ async def entrypoint(ctx: JobContext):
     asyncio.create_task(_watch_silence())
 
     await session.generate_reply(
-        instructions="Greet the user briefly by name — they are the user — and "
+        instructions="Greet the user briefly by name — they are "
+                     f"{os.environ.get('AGENT_USER_NAME')} — and "
                      "ask what they need. One short sentence."
     )
 
@@ -443,8 +444,8 @@ In another terminal:
 
 ```bash
 export LIVEKIT_URL=ws://localhost:7880
-export LIVEKIT_API_KEY=devkey
-export LIVEKIT_API_SECRET=secret-at-least-32-characters-long-x
+export LIVEKIT_API_KEY=<your-api-key>
+export LIVEKIT_API_SECRET=<your-api-secret>
 lk room join --identity tester --publish-mic gerdoo
 ```
 
@@ -475,8 +476,8 @@ python3 agent.py dev
 
 ```bash
 export LIVEKIT_URL=ws://localhost:7880
-export LIVEKIT_API_KEY=devkey
-export LIVEKIT_API_SECRET=secret-at-least-32-characters-long-x
+export LIVEKIT_API_KEY=<your-api-key>
+export LIVEKIT_API_SECRET=<your-api-secret>
 lk room join --identity tester --publish-mic gerdoo
 ```
 
@@ -525,8 +526,8 @@ import pytest
 
 import voice
 
-KEY = "devkey"
-SECRET = "secret-at-least-32-characters-long-x"
+KEY = "<your-api-key>"
+SECRET = "<your-api-secret>"
 
 
 def decode(token):
@@ -665,8 +666,8 @@ def _voice_cfg():
     cfg = load_config()
     return (
         cfg.get("livekit_url", "ws://mac-studio.local:7880"),
-        cfg.get("livekit_api_key", "devkey"),
-        cfg.get("livekit_api_secret", "secret-at-least-32-characters-long-x"),
+        cfg.get("livekit_api_key", ""),
+        cfg.get("livekit_api_secret", ""),
     )
 
 

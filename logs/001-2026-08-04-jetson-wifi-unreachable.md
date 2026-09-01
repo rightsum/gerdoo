@@ -36,7 +36,7 @@ The board was physically powered and running — the Teensy 4.1 hanging off its 
 
 ### Wrong turn worth recording
 
-A ping sweep found `<lan-ip>` and `.44` with MAC prefix `d8:3a:dd` and SSH open. I read that OUI as NVIDIA and guessed the Jetson had changed IP. **Wrong** — `d8:3a:dd` is Raspberry Pi Ltd, the banner was `SSH-2.0-OpenSSH_9.2p1 Debian-2+deb12u3`, and both IPs shared one host key. It was the `rspb` Pi already in `~/.ssh/config:11`. Two consecutive MACs on one board is a wired+wifi pair, not two devices.
+A ping sweep found two other LAN IPs with MAC prefix `d8:3a:dd` and SSH open. I read that OUI as NVIDIA and guessed the Jetson had changed IP. **Wrong** — `d8:3a:dd` is Raspberry Pi Ltd, the banner was `SSH-2.0-OpenSSH_9.2p1 Debian-2+deb12u3`, and both IPs shared one host key. It was the `rspb` Pi already in `~/.ssh/config:11`. Two consecutive MACs on one board is a wired+wifi pair, not two devices.
 
 **Lesson:** confirm an OUI against the SSH banner and host key before acting on it.
 
@@ -131,7 +131,7 @@ Residual: stddev 22.6 ms with a 85 ms max is still high for a 5 ms floor. Not po
 | | |
 |---|---|
 | SSID | `<your-ssid>` |
-| BSSID | `<router-bssid>` (Fritz!Box; gateway MAC `<gateway-mac>`) |
+| BSSID | `<router-bssid>` (the router; gateway MAC `<gateway-mac>`) |
 | Channel / freq | 1 / 2412 MHz — **2.4 GHz** |
 | Signal | −54 dBm |
 | RX / TX bitrate | 78.0 / 156.0 Mbit/s, VHT-MCS 4/8, NSS 2 |

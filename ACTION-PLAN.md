@@ -33,7 +33,7 @@ B  Bench measure  ──┘         │
 | **A1** | ~~Disable wifi power save~~ | ~~2026-08-04~~ | ✅ **Done 2026-08-04.** `iw dev wlP1p1s0 get power_save` → `off`. See [log 001](logs/001-2026-08-04-jetson-wifi-unreachable.md) |
 | **A2** | **Confirm the fix survives idle** | **2026-08-04** | Leave Jetson untouched **≥ 2 h**, then cold `ssh user@<robot-ip>`. Connect in **< 5 s**, first try. Power save only bites after idle — A1 is unproven until this passes |
 | **A3** | Move wifi to 5 GHz | 2026-08-06 Thu | Currently ch 1 / 2412 MHz, jitter stddev **22.6 ms** against a **5.3 ms** floor. After: stddev **< 10 ms** over 50 pings |
-| **A4** | DHCP reservation for `<jetson-wifi-mac>` | 2026-08-06 Thu | Fritz!Box pins `.173`. Reboot Jetson, IP unchanged |
+| **A4** | DHCP reservation for `<jetson-wifi-mac>` | 2026-08-06 Thu | Router pins `<robot-ip>`. Reboot Jetson, IP unchanged |
 | **A5** | ~~Document the USB fallback in `inventory.md`~~ | ~~2026-08-06~~ | ✅ **DONE 2026-08-04.** New **🔑 Access** section at the top of `inventory.md`: both paths, the power-save warning, stable by-id device paths, and the running services |
 | **A6** | ⚠️ **Replace the test control-panel password** | **now** | A throwaway password (value deliberately not recorded here) was set during [log 008](logs/008-2026-08-04-control-panel-camera-lidar.md) testing and is **live on the LAN right now**. It gates a camera stream. Fix: `cd ~/robot-face && python3 manage.py set-password && systemctl --user restart robot-face`, then confirm the old one is rejected |
 

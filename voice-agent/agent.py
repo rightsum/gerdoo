@@ -88,6 +88,10 @@ SILENCE_TIMEOUT_S = float(os.environ.get("SILENCE_TIMEOUT_S", "30"))
 # The robot does NOT greet by default. The wake word already plays a chime, so
 # a spoken greeting is a second announcement nobody asked for — and it delays
 # the point at which the user can start talking. Set GREET=1 to bring it back.
+# Personal values — the user's name, credentials — stay in .env, never here.
+# Optional; if unset the greeting is warm but nameless.
+USER_NAME = os.environ.get("AGENT_USER_NAME", "").strip()
+
 GREET = os.environ.get("GREET", "0") == "1"
 
 
@@ -269,10 +273,14 @@ async def entrypoint(ctx: JobContext):
 
     if GREET:
         try:
-            handle = session.generate_reply(
-                instructions="Greet the user briefly by name — they are the user — "
-                             "and ask what they need. One short sentence."
-            )
+            if USER_NAME:
+                greeting = (f"Greet the user briefly by name — they are "
+                             f"{USER_NAME} — and ask what they need. "
+                             "One short sentence.")
+            else:
+                greeting = ("Greet the user briefly and warmly, and ask what "
+                             "they need. One short sentence.")
+            handle = session.generate_reply(instructions=greeting)
             await handle
             _trace(f"greeting done; chat_items={len(getattr(handle, 'chat_items', []) or [])}")
         except Exception as e:

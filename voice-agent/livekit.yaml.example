@@ -1,0 +1,30 @@
+# Example config for `livekit-server --config livekit.yaml`.
+# Copy to livekit.yaml (gitignored) and set your own key pair:
+#   cp livekit.yaml.example livekit.yaml
+#
+# Generate a pair with the LiveKit CLI:
+#   lk token create ...  # or pick any key name + a 32+ char random secret
+
+# Binding to :: is deliberate, not cosmetic. If the host running the server
+# has an IPv6-only mDNS name (e.g. <your-mac>.local resolving to AAAA only),
+# an IPv4-only listener is unreachable from the robot by name. Bind :: unless
+# you are sure your name resolves to an A record.
+port: 7880
+bind_addresses:
+  - "::"
+
+rtc:
+  tcp_port: 7881
+  port_range_start: 50000
+  port_range_end: 50100
+  use_external_ip: false
+
+# Your own pair — must match LIVEKIT_API_KEY / LIVEKIT_API_SECRET in .env
+# and livekit_api_key / livekit_api_secret in the robot's config.json.
+# This server is meant to be LAN-only and never exposed to the internet.
+# If that changes, rotate the pair and use a real secret.
+keys:
+  yourkey: change-me-to-a-long-random-secret-min-32-chars
+
+logging:
+  level: info
