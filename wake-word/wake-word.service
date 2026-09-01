@@ -9,8 +9,10 @@ Environment=PYTHONUNBUFFERED=1
 
 # The Brio's hardware capture gain does not survive a reboot, and the whole
 # reason 4 m worked was getting it to the top of its range. Set it every start.
-ExecStartPre=-/usr/bin/amixer -c 2 sset Headset 100%
-ExecStartPre=-/usr/bin/pactl set-source-volume alsa_input.usb-046d_Brio_500_2437ZBD0PNK8-02.analog-stereo 100%
+# Resolves cards BY NAME and pins PulseAudio's defaults. Replugging the USB hub
+# resets mixer levels and moves the default source to the speaker's own mic,
+# which presents as the robot going deaf mid-call.
+ExecStartPre=-%h/wake-word/audio-setup.sh
 
 # --device-name, not --device: PortAudio indices move between reboots.
 # --gain 3.0 was measured, not guessed: replaying a recorded session showed
@@ -22,6 +24,7 @@ ExecStart=/usr/bin/python3 %h/wake-word/wake_word.py \
     --threshold 0.5 \
     --cooldown 3.0 \
     --sound %h/wake-word/sounds/janam.mp3 \
+    --voice-url http://localhost:8080 \
     --log %h/wake-word/triggers.log \
     --save-hits %h/wake-word/hits \
     --record %h/wake-word/ambient.wav

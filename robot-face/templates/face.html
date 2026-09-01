@@ -12,6 +12,20 @@
       -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
     #face { position: fixed; inset: 0; }
     robot-face { position: absolute; inset: 0; }
+    @keyframes voicePulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+    body.pulse robot-face { animation: voicePulse 1.4s ease-in-out infinite; }
+    /* Caption for the voice session. The face carries the mood; this says in
+       words what the robot is doing, which matters most for "thinking" —
+       a colour alone does not distinguish it from waiting. */
+    #voice-caption {
+      position: fixed; left: 0; right: 0; bottom: 6vh;
+      text-align: center; pointer-events: none;
+      font: 500 3.2vh/1.3 ui-sans-serif, system-ui, sans-serif;
+      letter-spacing: 0.04em; color: #ffffff; opacity: 0;
+      text-shadow: 0 2px 12px rgba(0,0,0,0.6);
+      transition: opacity 0.35s ease;
+    }
+    #voice-caption.show { opacity: 0.85; }
   </style>
 </head>
 <body>
@@ -22,34 +36,217 @@
       speed="1"></robot-face>
   </div>
 
+  <div id="voice-caption"></div>
+  <!-- Agent audio elements are appended here. A detached <audio> does not
+       autoplay in Firefox, which is what the kiosk runs. Must live OUTSIDE the
+       renderer branch — it is needed by both. -->
+  <div id="voice-audio" hidden></div>
+
   {% if renderer == '2d' %}
   <script src="{{ url_for('static', filename='robot-face.js') }}"></script>
   {% else %}
   <script src="{{ url_for('static', filename='robot-face-gl.js') }}"></script>
   {% endif %}
+  <script src="{{ url_for('static', filename='livekit-client.umd.min.js') }}"></script>
   <script>
+    // Breadcrumbs to the server. A kiosk has no console, so anything that goes
+    // wrong here is otherwise invisible.
+    function jslog(msg) {
+      try {
+        fetch('/api/voice/log', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ msg: String(msg).slice(0, 400) }),
+        });
+      } catch {}
+    }
+    window.onerror = (m, src, line, col) => jslog(`JS ERROR ${m} @${line}:${col}`);
+    window.onunhandledrejection = (e) => jslog(`UNHANDLED ${e.reason && e.reason.message || e.reason}`);
+    jslog(`page loaded; LivekitClient=${typeof LivekitClient}`);
+
     const face = document.querySelector('robot-face');
+    jslog(`A: face=${face ? 'found' : 'NULL'}`);
+
+    let lastVoice = 'idle';
+
+    // Colours the face takes on during a voice session. `connecting` and
+    // `error` are the two that must be legible from across the room — they are
+    // the states where you would otherwise be staring at a face wondering what
+    // happened. The rest are ambient feedback.
+    const VOICE_LOOK = {
+      idle:       null,                                  // fall back to normal state
+      connecting: { color: '#FFAE1E', emotion: 'thinking',  pulse: true,  caption: 'connecting…' },
+      listening:  { color: '#2AD4FF', emotion: 'curious',   pulse: false, caption: 'listening' },
+      thinking:   { color: '#FFD34D', emotion: 'thinking',  pulse: true,  caption: 'thinking…' },
+      speaking:   { color: '#37D67A', emotion: 'happy',     pulse: false, caption: '' },
+      error:      { color: '#FF3B30', emotion: 'sad',       pulse: false, caption: "couldn't connect" },
+    };
+
+    jslog('B: before caption lookup');
+    const caption = document.getElementById('voice-caption');
+    if (!caption) jslog('MISSING #voice-caption — captions will not render');
+
+    function setCaption(text) {
+      caption.textContent = text || '';
+      caption.classList.toggle('show', !!text);
+    }
 
     function apply(state) {
       if (!state) return;
-      if (state.mood)  face.setAttribute('emotion', state.mood);
-      if (state.color) face.setAttribute('color', state.color);
+
+      const v = state.voice || 'idle';
+      const look = VOICE_LOOK[v];
+
+      if (look) {
+        face.setAttribute('color', look.color);
+        face.setAttribute('emotion', look.emotion);
+        document.body.classList.toggle('pulse', !!look.pulse);
+        setCaption(look.caption);
+      } else {
+        document.body.classList.remove('pulse');
+        setCaption('');
+        if (state.mood)  face.setAttribute('emotion', state.mood);
+        if (state.color) face.setAttribute('color', state.color);
+      }
+
+      if (v !== lastVoice) {
+        jslog(`voice ${lastVoice} -> ${v}`);
+        lastVoice = v;
+        if (v === 'connecting') joinVoice();
+        if (v === 'idle') leaveVoice();
+      }
+    }
+
+    // ---- Voice session -------------------------------------------------
+    // The client lives in the browser rather than in a Python service on the
+    // Jetson for one reason: the speaker sits beside the microphone, and
+    // WebRTC gives us echo cancellation for free. Without it the robot
+    // transcribes its own voice and talks to itself.
+    jslog('C: before voice session section');
+    let room = null;
+    const audioSink = document.getElementById('voice-audio');
+
+    async function report(voiceState, detail) {
+      try {
+        await fetch('/api/voice/state', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ voice: voiceState, detail: detail || '' }),
+        });
+      } catch (e) { console.warn('voice state report failed:', e); }
+    }
+
+    async function joinVoice() {
+      jslog(`joinVoice called; room=${room ? 'present' : 'null'}`);
+      if (room) {
+        // Already in a session. Something re-set the state to `connecting`;
+        // correct it rather than returning and leaving the face frozen there.
+        jslog('already connected — re-reporting listening');
+        report('listening');
+        return;
+      }
+      try {
+        const res = await fetch('/api/voice/wake', { method: 'POST' });
+        const { url, token } = await res.json();
+
+        room = new LivekitClient.Room({
+          adaptiveStream: true,
+          audioCaptureDefaults: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+        });
+
+        room.on(LivekitClient.RoomEvent.TrackSubscribed, (track) => {
+          if (track.kind !== 'audio') return;
+          // attach() returns a DETACHED <audio>. It must be in the document or
+          // Firefox will not autoplay it, and the robot is silent while looking
+          // perfectly connected.
+          const el = track.attach();
+          el.autoplay = true;
+          audioSink.appendChild(el);
+        });
+        room.on(LivekitClient.RoomEvent.TrackUnsubscribed, (track) => {
+          track.detach().forEach(el => el.remove());
+        });
+
+        // The agent publishes its own state as a participant attribute
+        // (lk.agent.state: initializing | idle | listening | thinking |
+        // speaking). Using that is exact — inferring from who is making noise
+        // cannot tell "thinking" from "waiting", which is the one distinction
+        // worth showing.
+        room.on(LivekitClient.RoomEvent.ParticipantAttributesChanged, (changed) => {
+          const s = changed['lk.agent.state'];
+          if (!s) return;
+
+          // Half-duplex: mute the microphone while the robot is talking.
+          //
+          // Browser echo cancellation cannot help here — the speaker and the
+          // Brio are two SEPARATE USB devices, so there is no shared clock for
+          // AEC to correlate. Without this the mic hears the robot, Scribe
+          // transcribes it, and the model holds a conversation with itself.
+          //
+          // The cost is that you cannot interrupt it mid-sentence. That is a
+          // real loss, and the alternative is it talking over itself forever.
+          // The microphone is never touched mid-call. Echo is handled agent-side
+          // (turn_handling interruption disabled); muting the track here churned
+          // the audio path and silently killed the call after a few turns.
+          if (s === 'speaking')       report('speaking');
+          else if (s === 'thinking')  report('thinking');
+          else if (s === 'listening' || s === 'idle') report('listening');
+        });
+        room.on(LivekitClient.RoomEvent.Disconnected, () => {
+          room = null;
+          report('idle');
+        });
+
+        const limit = (p, ms, what) => Promise.race([
+          p,
+          new Promise((_, rej) => setTimeout(() => rej(new Error(what + ' timed out after ' + ms + 'ms')), ms)),
+        ]);
+
+        jslog(`connecting to ${url}`);
+        await limit(room.connect(url, token), 15000, 'room.connect');
+        jslog('connected; enabling mic');
+        await limit(room.localParticipant.setMicrophoneEnabled(true), 10000, 'microphone');
+        jslog('mic enabled');
+        report('listening');
+      } catch (e) {
+        if (room) { try { await room.disconnect(); } catch {} }
+        room = null;
+        jslog(`joinVoice FAILED: ${(e && e.message) || e}`);
+        report('error', String((e && e.message) || e));
+        setTimeout(() => report('idle'), 5000);
+      }
+    }
+
+    async function leaveVoice() {
+      if (!room) return;
+      try { await room.disconnect(); } catch {}
+      room = null;
+      audioSink.replaceChildren();
     }
 
     // Live updates via Server-Sent Events, with automatic reconnect if the
     // backend restarts or the network blips.
+    jslog('D: before SSE section');
     let es;
     function connect() {
       es = new EventSource('/api/events');
-      es.onmessage = (ev) => { try { apply(JSON.parse(ev.data)); } catch {} };
+      es.onmessage = (ev) => {
+        try { apply(JSON.parse(ev.data)); }
+        catch (e) { jslog(`apply() threw: ${(e && e.message) || e}`); }
+      };
       es.onerror = () => { es.close(); setTimeout(connect, 2000); };
     }
+    jslog('E: calling connect()');
     connect();
+    jslog('F: connect() returned');
 
     // Belt-and-suspenders: if the stream is ever silent, poll occasionally.
     setInterval(async () => {
       try { apply(await (await fetch('/api/state', { cache: 'no-store' })).json()); }
-      catch {}
+      catch (e) { jslog(`poll apply() threw: ${(e && e.message) || e}`); }
     }, 30000);
   </script>
 </body>

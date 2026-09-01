@@ -1,0 +1,20 @@
+# Binding to :: is required, not cosmetic. mac-studio.local
+# resolves to AAAA records only, so an IPv4-only listener is unreachable
+# from the Jetson by name.
+port: 7880
+bind_addresses:
+  - "::"
+
+rtc:
+  tcp_port: 7881
+  port_range_start: 50000
+  port_range_end: 50100
+  use_external_ip: false
+
+# Development keys. This server is LAN-only and never exposed to the
+# internet. If that changes, these must be replaced.
+keys:
+  devkey: secret-at-least-32-characters-long-x
+
+logging:
+  level: info

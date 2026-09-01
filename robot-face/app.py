@@ -18,13 +18,14 @@ import threading
 
 from flask import (
     Flask, request, jsonify, Response, render_template,
-    redirect, session, url_for,
+    redirect, session, url_for, make_response,
 )
 from werkzeug.security import check_password_hash
 
 import gesture
 import lidar
 from camera import camera, CameraError
+import voice
 
 
 def local_only():
@@ -167,7 +168,15 @@ def sensor_guard():
 # ---- Face (public, kiosk) ----
 @app.route("/")
 def face():
-    return render_template("face.html", state=load_state(), renderer=load_config()["renderer"])
+    # No-store, because the kiosk browser has no one to press reload. A cached
+    # face.html silently runs whatever JS shipped when it was cached, which
+    # looks exactly like the new code being broken.
+    resp = make_response(
+        render_template("face.html", state=load_state(),
+                        renderer=load_config()["renderer"])
+    )
+    resp.headers["Cache-Control"] = "no-store, must-revalidate"
+    return resp
 
 
 @app.route("/api/state")
@@ -204,6 +213,93 @@ def api_events():
             "Connection": "keep-alive",
         },
     )
+
+
+# ---- Voice sessions ----
+# The room is fixed: one robot, one conversation. The agent on the Mac is
+# auto-dispatched when this room is created, so joining is all the robot does.
+VOICE_ROOM = "gerdoo"
+
+
+def _voice_cfg():
+    cfg = load_config()
+    return (
+        cfg.get("livekit_url", "ws://mac-studio.local:7880"),
+        cfg.get("livekit_api_key", "devkey"),
+        cfg.get("livekit_api_secret", "secret-at-least-32-characters-long-x"),
+    )
+
+
+def _set_voice(state, detail=""):
+    """Update voice state and push it to the face over the existing SSE."""
+    s = load_state()
+    s["voice"] = state
+    s["voice_detail"] = detail
+    s["updated"] = time.time()
+    save_state(s)
+    broadcast(s)
+    return s
+
+
+@app.route("/api/voice/wake", methods=["POST"])
+def api_voice_wake():
+    """Called by the wake-word service. Mints a token and tells the face to join."""
+    if not local_only():
+        return jsonify(error="forbidden"), 403
+    url, key, secret = _voice_cfg()
+    token = voice.mint_token(VOICE_ROOM, "face", key, secret)
+    _set_voice("connecting")
+    return jsonify({"url": url, "token": token, "room": VOICE_ROOM})
+
+
+@app.route("/api/voice/state", methods=["POST"])
+def api_voice_state():
+    """Called by the browser as the session progresses."""
+    if not local_only():
+        return jsonify(error="forbidden"), 403
+    data = request.get_json(force=True, silent=True) or {}
+    state = data.get("voice")
+    if not voice.is_valid_state(state):
+        return jsonify({"error": "unknown voice state", "got": state}), 400
+    # The kiosk has no console anyone can open, so the browser's own reason for
+    # failing has to come back here to be readable at all.
+    detail = str(data.get("detail") or "")[:300]
+    if detail:
+        app.logger.warning("voice %s: %s", state, detail)
+    return jsonify(_set_voice(state, detail))
+
+
+# Breadcrumbs from the kiosk browser. It has no console anyone can open, so
+# without this a JS failure is indistinguishable from the network hanging.
+_voice_log = []
+
+
+@app.route("/api/voice/log", methods=["POST"])
+def api_voice_log():
+    if not local_only():
+        return jsonify(error="forbidden"), 403
+    msg = str((request.get_json(force=True, silent=True) or {}).get("msg", ""))[:400]
+    _voice_log.append(f"{time.strftime('%H:%M:%S')} {msg}")
+    del _voice_log[:-60]
+    app.logger.warning("voice-js: %s", msg)
+    return jsonify(ok=True)
+
+
+@app.route("/api/voice/log")
+def api_voice_log_read():
+    if not local_only():
+        return jsonify(error="forbidden"), 403
+    return jsonify(lines=_voice_log)
+
+
+@app.route("/api/voice/status")
+def api_voice_status():
+    """Polled by the wake-word service so it knows when to resume listening."""
+    if not local_only():
+        return jsonify(error="forbidden"), 403
+    st = load_state()
+    return jsonify({"voice": st.get("voice", "idle"),
+                    "detail": st.get("voice_detail", "")})
 
 
 # ---- Auth ----
