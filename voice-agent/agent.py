@@ -18,6 +18,7 @@ import time
 from dotenv import load_dotenv
 from livekit.agents import (
     Agent,
+    RunContext,
     AgentSession,
     JobContext,
     RoomInputOptions,
@@ -26,7 +27,51 @@ from livekit.agents import (
 )
 from livekit.plugins import elevenlabs, openai, silero
 
+from livekit.agents import function_tool
+
+import local_time
+import web_search
 from session_rules import SilenceTimer, is_closing_phrase
+
+
+@function_tool
+async def what_time_is_it(context: RunContext, when: str = "today") -> str:
+    """
+    The current time, and the date of any day referred to relatively.
+
+    Always returns BOTH the Gregorian and the Persian (Jalali) date. Use it for
+    the time, the date, the day of the week, and — importantly — to turn a
+    relative reference into a real date before searching for something that
+    happened then. Do not guess; you have no clock of your own.
+
+    Args:
+        when: Which day. "today" by default. Also understands "yesterday",
+            "tomorrow", "last week", "next week", "last month", "N days ago",
+            "in N weeks", and similar.
+    """
+    out = local_time.describe(when)
+    _trace(f"TIME[{when}]: {out}")
+    return out
+
+
+@function_tool
+async def look_it_up(context: RunContext, query: str) -> str:
+    """
+    Search the web for current information.
+
+    Use this for anything you cannot know: today's news, weather, prices,
+    sports results, when something is open, or any fact that changes over time.
+    Do not use it for chat, opinions, or things you already know.
+
+    Args:
+        query: What to search for. A short phrase works best. Write it in
+            English even when the conversation is in Persian — search engines
+            index far more in English — but answer in the user's language.
+    """
+    _trace(f"SEARCH: {query!r}")
+    result = await web_search.search(query)
+    _trace(f"SEARCH returned {len(result)} chars")
+    return result
 
 load_dotenv()
 log = logging.getLogger("gerdoo-voice")
@@ -57,7 +102,41 @@ SYSTEM_PROMPT = (
     "mis-transcription.\n"
     "- If a transcript is too garbled to understand, ask the person to repeat "
     "themselves, in Persian.\n\n"
-    "Never mention that you are an AI model."
+    "Never mention that you are an AI model.\n\n"
+    "LOOKING THINGS UP:\n"
+    "- You have a web search tool. Use it whenever the answer depends on "
+    "current information you cannot know — weather, news, prices, opening "
+    "hours, results, anything that changes.\n"
+    "- Do NOT use it for chat, opinions, or things you already know. "
+    "Searching to answer 'how are you' is absurd.\n"
+    "- You are SPEAKING the answer. Give the one or two facts that actually "
+    "answer the question, in a sentence or two. Never read out a list of "
+    "results, never read URLs aloud, and never say '[1]' or 'according to "
+    "result two'.\n"
+    "- Say something brief first if a search will take a moment, such as "
+    "'بذار ببینم' or 'let me check'.\n"
+    "- If the search fails or finds nothing useful, say so plainly rather "
+    "than inventing an answer.\n\n"
+    "TIME AND DATE:\n"
+    "- You have a clock tool. Use it for the time, the date, the day of the "
+    "week, or anything that depends on today — never guess.\n"
+    "- Speaking Persian, give the Persian date and say the time naturally. "
+    "Speaking English, give the ordinary date. Do not recite both calendars "
+    "unless asked.\n"
+    "- Say the time the way a person would: 'ten to eleven', not '10:50:00'.\n"
+    "- Both calendars are always returned. Speaking Persian, lead with the "
+    "Persian date; speaking English, lead with the Gregorian. Give the other "
+    "only if it is useful or asked for.\n"
+    "- When someone asks about a day in relative terms — yesterday, last "
+    "week, three days ago — call the clock tool FIRST to turn it into a real "
+    "date, then put that date into your search. Searching for 'yesterday' "
+    "finds nothing; searching for '1 September 2026' finds the news.\n\n"
+    "ANSWER LENGTH ON REQUEST:\n"
+    "- If someone asks for an answer of a given length — 'in 30 seconds', "
+    "'briefly', 'in one sentence', 'tell me everything' — obey it. Around 70 "
+    "spoken words is roughly 30 seconds.\n"
+    "- A request for a summary of several things is still speech: give the "
+    "headline of each in a sentence, not a numbered list read aloud."
     "\n\n"
     # ElevenLabs v3 audio tags. The TTS renders these as real delivery rather
     # than reading them aloud, so they are how the robot laughs or sighs instead
@@ -192,7 +271,11 @@ async def entrypoint(ctx: JobContext):
         turn_handling={
             "interruption": {
                 "enabled": True,
-                "mode": "adaptive",
+                # "vad", not "adaptive": adaptive calls out to LiveKit Cloud
+                # (agent-gateway.livekit.cloud) and this server is self-hosted,
+                # so it 401s, retries, and falls back to VAD anyway — after
+                # burning a couple of seconds on every session.
+                "mode": "vad",
                 # Low, because the echo filter above now catches her own
                 # voice by content. What matters here is that a real
                 # interruption is not missed.
@@ -294,7 +377,8 @@ async def entrypoint(ctx: JobContext):
                 return
 
     await session.start(
-        agent=Agent(instructions=SYSTEM_PROMPT),
+        agent=Agent(instructions=SYSTEM_PROMPT,
+                    tools=[look_it_up, what_time_is_it]),
         room=ctx.room,
         # The browser only sees "idle" via its Disconnected handler, so the
         # room must be deleted when this session ends — otherwise the face
@@ -310,7 +394,16 @@ async def entrypoint(ctx: JobContext):
     def _on_user_state(ev):
         # Fires from VAD. If this never fires, no audio is reaching the agent at
         # all; if it fires but no transcript follows, STT is the failure.
-        _trace(f"USER STATE: {getattr(ev, 'old_state', '?')} -> {getattr(ev, 'new_state', '?')}")
+        new = getattr(ev, "new_state", "?")
+        _trace(f"USER STATE: {getattr(ev, 'old_state', '?')} -> {new}")
+        # Reset the hang-up clock the moment someone STARTS talking, not when
+        # their sentence finishes transcribing. Waiting for the transcript lost
+        # a real question: the user began speaking two seconds before the
+        # timeout, the transcript landed one second after the session had begun
+        # closing, and the answer was dropped with "speech scheduling is
+        # paused".
+        if new == "speaking":
+            timer.mark_user_spoke(now=time.monotonic())
 
     @session.on("agent_state_changed")
     def _on_agent_state(ev):
