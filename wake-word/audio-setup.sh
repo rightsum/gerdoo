@@ -38,18 +38,13 @@ else
     echo "speaker: card '$SPK_CARD_NAME' NOT FOUND" >&2
 fi
 
-# The call uses the SPEAKER's own microphone, not the Brio.
+# The call uses the BRIO for capture and the USB speaker for playback.
 #
-# Not a downgrade — it is what makes echo cancellation work at all. AEC has to
-# subtract played audio from captured audio, and that only holds if both share a
-# clock. The Brio and the speaker are separate USB devices with independent
-# clocks, so they drift apart; cancellation held for about thirty seconds and
-# then the robot started transcribing its own voice again. Capture and playback
-# on ONE device cannot drift.
-#
-# The Brio stays dedicated to wake-word detection, which also removes the
-# two-processes-one-microphone contention entirely.
-SRC=$(pactl list short sources 2>/dev/null | awk '/USB2.0/ && !/monitor/ {print $2; exit}')
+# They are separate USB devices with independent clocks, which is exactly what
+# software echo cancellation struggles with — hence adjust_time=1 below. Using
+# the speaker's own microphone would put capture and playback in one clock
+# domain and make AEC trivial, but that microphone is poor and was rejected.
+SRC=$(pactl list short sources 2>/dev/null | awk '/Brio/ && !/monitor/ {print $2; exit}')
 SINK=$(pactl list short sinks 2>/dev/null | awk '/USB2.0/ && !/monitor/ {print $2; exit}')
 [ -n "${SRC:-}" ] && pactl set-source-volume "$SRC" 100% >/dev/null 2>&1
 
@@ -74,7 +69,9 @@ if ! pactl list short modules 2>/dev/null | grep -q echo-cancel; then
         pactl load-module module-echo-cancel \
             source_master="$SRC" sink_master="$SINK" \
             source_name=gerdoo_aec_source sink_name=gerdoo_aec_sink \
-            aec_method=webrtc adjust_time=1 adjust_threshold=1 >/dev/null 2>&1 \
+            aec_method=webrtc adjust_time=1 adjust_threshold=1 \
+            aec_args=extended_filter=1 \
+            >/dev/null 2>&1 \
             && echo "echo cancellation: loaded" \
             || echo "echo cancellation: FAILED to load" >&2
         sleep 1

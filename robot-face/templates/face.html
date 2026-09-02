@@ -150,10 +150,18 @@
 
         room = new LivekitClient.Room({
           adaptiveStream: true,
+          // All OFF, deliberately. PulseAudio's module-echo-cancel already
+          // does echo cancellation, noise suppression and gain control on the
+          // device before the browser ever sees the audio. Running the
+          // browser's WebRTC processing on top means two cancellers in series:
+          // the second one's echo estimate is wrong because the first already
+          // altered the signal, and both degrade. Browser AEC also cannot help
+          // here regardless — it assumes render and capture share a clock, and
+          // ours are separate USB devices.
           audioCaptureDefaults: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false,
           },
         });
 

@@ -244,13 +244,63 @@ def _set_voice(state, detail=""):
     return s
 
 
+def stt_language():
+    """Panel-selected speech-recognition language: auto, fa or en."""
+    code = load_config().get("stt_language", "auto")
+    return code if voice.is_valid_language(code) else "auto"
+
+
+@app.route("/api/voice/language", methods=["GET", "POST"])
+def api_voice_language():
+    if request.method == "POST":
+        if not local_only() and not logged_in():
+            return jsonify(error="unauthorized"), 401
+        code = (request.get_json(force=True, silent=True) or {}).get("language")
+        if not voice.is_valid_language(code):
+            return jsonify(error="unknown language", got=code), 400
+        cfg = load_config()
+        cfg["stt_language"] = code
+        save_config(cfg)
+        app.logger.warning("stt language -> %s", code)
+    return jsonify({"language": stt_language(),
+                    "choices": voice.STT_LANGUAGES})
+
+
+def voice_enabled():
+    """Whether the robot answers to its name at all. Persisted in config."""
+    return bool(load_config().get("voice_enabled", True))
+
+
+@app.route("/api/voice/enabled", methods=["GET", "POST"])
+def api_voice_enabled():
+    """Master switch for the wake word and conversation. Used by the panel."""
+    if request.method == "POST":
+        # logged_in() is the app's own helper. An earlier version invented a
+        # session key that is never set, so every POST from the panel returned
+        # 403 and the toggle silently sprang back on the next poll.
+        if not local_only() and not logged_in():
+            return jsonify(error="unauthorized"), 401
+        data = request.get_json(force=True, silent=True) or {}
+        cfg = load_config()
+        cfg["voice_enabled"] = bool(data.get("enabled", True))
+        save_config(cfg)
+        # Ending any live session immediately is the point of an off switch.
+        if not cfg["voice_enabled"] and load_state().get("voice") != "idle":
+            _set_voice("idle")
+        app.logger.warning("voice %s", "enabled" if cfg["voice_enabled"] else "DISABLED")
+    return jsonify({"enabled": voice_enabled()})
+
+
 @app.route("/api/voice/wake", methods=["POST"])
 def api_voice_wake():
     """Called by the wake-word service. Mints a token and tells the face to join."""
     if not local_only():
         return jsonify(error="forbidden"), 403
+    if not voice_enabled():
+        return jsonify({"error": "voice disabled"}), 409
     url, key, secret = _voice_cfg()
-    token = voice.mint_token(VOICE_ROOM, "face", key, secret)
+    token = voice.mint_token(VOICE_ROOM, "face", key, secret,
+                             metadata={"stt_language": stt_language()})
     _set_voice("connecting")
     return jsonify({"url": url, "token": token, "room": VOICE_ROOM})
 
@@ -297,12 +347,22 @@ def api_voice_log_read():
 
 @app.route("/api/voice/status")
 def api_voice_status():
-    """Polled by the wake-word service so it knows when to resume listening."""
-    if not local_only():
-        return jsonify(error="forbidden"), 403
+    """
+    Polled by the wake-word service so it knows when to resume listening, and by
+    the control panel to paint the Voice switch.
+
+    Read-only, so a logged-in panel on the LAN is allowed as well as localhost.
+    Locking this to localhost made the panel's poll return 403 every three
+    seconds, which the page then misread as "enabled" and repainted — the switch
+    appeared to turn itself back on.
+    """
+    if not local_only() and not logged_in():
+        return jsonify(error="unauthorized"), 401
     st = load_state()
     return jsonify({"voice": st.get("voice", "idle"),
-                    "detail": st.get("voice_detail", "")})
+                    "detail": st.get("voice_detail", ""),
+                    "enabled": voice_enabled(),
+                    "language": stt_language()})
 
 
 # ---- Auth ----
@@ -338,7 +398,11 @@ def control():
     if not logged_in():
         return redirect(url_for("login"))
     cfg = load_config()
-    return render_template(
+    # no-store, for the same reason as the face page: the panel's JavaScript
+    # changes, and a browser serving a cached copy runs old code against a new
+    # API. That presented as a toggle that flipped and then sprang back with no
+    # error shown.
+    resp = make_response(render_template(
         "control.html",
         moods=cfg["moods"],
         colors=cfg["colors"],
@@ -347,7 +411,9 @@ def control():
         camera_present=camera.status()["present"],
         lidar_installed=lidar.unit_installed(),
         gesture_installed=gesture.unit_installed(),
-    )
+    ))
+    resp.headers["Cache-Control"] = "no-store, must-revalidate"
+    return resp
 
 
 @app.route("/api/state", methods=["POST"])

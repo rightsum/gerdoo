@@ -148,6 +148,33 @@
     </div>
 
     <!-- ---------------- Camera ---------------- -->
+    <!-- ---------------- Voice ---------------- -->
+    <section class="panel" id="voice-panel">
+      <div class="panel-head">
+        <h2>Voice</h2>
+        <span class="status" id="voice-status"><span class="led"></span><span id="voice-status-text">—</span></span>
+        <button class="toggle" id="voice-toggle" aria-label="Toggle wake word and conversation"></button>
+      </div>
+      <div class="panel-body">
+        <div style="font-size:13px;color:#8493b3;line-height:1.5">
+          Answers to <span style="font-family:ui-monospace,monospace">گردو بابا</span>, then
+          holds a conversation until you say goodbye or 30&nbsp;seconds pass in silence.
+          <div style="margin-top:6px">Turning this off stops the robot listening for its
+          name, and ends any call in progress.</div>
+        </div>
+        <div style="margin-top:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <label for="voice-lang" style="font-size:13px;color:#e0e6f0">Hears</label>
+          <select id="voice-lang" style="background:#1a2438;color:#e0e6f0;border:1px solid #2a3a5a;
+                  border-radius:6px;padding:6px 8px;font-size:13px">
+            <option value="auto">Auto-detect</option>
+            <option value="fa">Persian only</option>
+            <option value="en">English only</option>
+          </select>
+          <span id="voice-lang-note" style="font-size:12px;color:#8493b3"></span>
+        </div>
+      </div>
+    </section>
+
     <section class="panel" id="camera-panel">
       <div class="panel-head">
         <h2>Camera</h2>
@@ -336,6 +363,95 @@
       if (!r.ok) throw new Error(body.message || body.error || 'request failed');
       return body;
     }
+
+    // ---- Voice ----
+    const voiceToggle = document.getElementById('voice-toggle');
+    const voiceStatus = document.getElementById('voice-status');
+    const voiceStatusText = document.getElementById('voice-status-text');
+
+    function paintVoice(enabled, state) {
+      voiceToggle.classList.toggle('on', !!enabled);
+      voiceStatus.classList.toggle('on', !!enabled);
+      // While a call is up the live state is more useful than the switch, so
+      // show it: "listening", "speaking" and so on come from the session.
+      voiceStatusText.textContent =
+        !enabled ? 'off' : (state && state !== 'idle' ? state : 'ready');
+    }
+
+    async function refreshVoice() {
+      try {
+        const r = await fetch('/api/voice/status', { cache: 'no-store' });
+        if (!r.ok) { voiceStatusText.textContent = 'unreachable'; return; }
+        const d = await r.json();
+        // Require an explicit boolean. `d.enabled !== false` treated an error
+        // body as "enabled", so a failing poll silently repainted the switch on.
+        if (typeof d.enabled !== 'boolean') { voiceStatusText.textContent = 'unreachable'; return; }
+        paintVoice(d.enabled, d.voice);
+        if (d.language && d.language !== voiceLang.value) paintLang(d.language);
+      } catch {
+        voiceStatusText.textContent = 'unreachable';
+      }
+    }
+
+    voiceToggle.addEventListener('click', async () => {
+      const next = !voiceToggle.classList.contains('on');
+      voiceToggle.classList.add('busy');
+      try {
+        const r = await fetch('/api/voice/enabled', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: next }),
+        });
+        const d = await r.json();
+        if (!r.ok || typeof d.enabled !== 'boolean') {
+          // Say so rather than flipping the switch and letting the next poll
+          // silently put it back — that looks like the robot ignoring you.
+          voiceStatusText.textContent = d.error || 'failed';
+          await refreshVoice();
+        } else {
+          paintVoice(d.enabled, null);
+        }
+      } catch {
+        voiceStatusText.textContent = 'failed';
+      }
+      voiceToggle.classList.remove('busy');
+    });
+
+    // ---- Recognition language ----
+    const voiceLang = document.getElementById('voice-lang');
+    const voiceLangNote = document.getElementById('voice-lang-note');
+    const LANG_NOTE = {
+      auto: 'convenient, but mis-hears short Persian as another language',
+      fa: 'most accurate for Persian; English will transcribe badly',
+      en: 'most accurate for English; Persian will transcribe badly',
+    };
+
+    function paintLang(code) {
+      voiceLang.value = code;
+      voiceLangNote.textContent = LANG_NOTE[code] || '';
+    }
+
+    voiceLang.addEventListener('change', async () => {
+      const code = voiceLang.value;
+      try {
+        const r = await fetch('/api/voice/language', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ language: code }),
+        });
+        const d = await r.json();
+        if (!r.ok || !d.language) { voiceLangNote.textContent = d.error || 'failed'; return; }
+        paintLang(d.language);
+        // The language is read when a call starts, so a call already running
+        // keeps the old one. Say so rather than letting it look ignored.
+        voiceLangNote.textContent = LANG_NOTE[d.language] + ' — applies to the next call';
+      } catch {
+        voiceLangNote.textContent = 'failed';
+      }
+    });
+
+    refreshVoice();
+    setInterval(refreshVoice, 3000);
 
     // ---- Camera ----
     const camToggle = document.getElementById('cam-toggle');

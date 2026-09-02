@@ -45,7 +45,15 @@ DEFAULT_MODEL = os.path.expanduser("~/models/vosk-model-small-fa-0.42")
 DEFAULT_SOUND = os.path.expanduser("~/wake-word/sounds/janam.mp3")
 
 WAKE_PHRASE = "گردو بابا"
-WAKE_HEAD = "گردو"          # the discriminating half; "بابا" alone is far too common
+WAKE_HEAD = "گردو"   # the discriminating half; "بابا" alone is far too common
+
+# Longest utterance still treated as someone calling the robot. Above this it is
+# conversation, not a wake word.
+MAX_UTTERANCE_TOKENS = 4
+
+# How often to re-read the panel's master switch. Also bounds how long the
+# microphone stays open after someone switches voice off.
+SWITCH_POLL_S = 2.0
 
 # Two grammars, and the difference matters far more than the confidence threshold.
 #
@@ -116,6 +124,15 @@ def start_voice_session(base_url, timeout=5.0):
             return r.status == 200
     except Exception as e:
         print(f"  voice wake failed: {e}", file=sys.stderr)
+        return False
+
+
+def voice_disabled(base_url, timeout=3.0):
+    """True if the panel's master switch is off. Failure is treated as enabled."""
+    try:
+        with urllib.request.urlopen(f"{base_url}/api/voice/status", timeout=timeout) as r:
+            return json.loads(r.read()).get("enabled", True) is False
+    except Exception:
         return False
 
 
@@ -197,14 +214,40 @@ def score(result):
     from dragging the score around.
     """
     text = result.get("text", "").strip()
-    # Require BOTH words. Under the filler grammar "بابا" can be emitted on its
-    # own, so the head word alone is no longer sufficient evidence.
-    if WAKE_HEAD not in text or "بابا" not in text:
+
+    # The two words must be ADJACENT. Merely containing both somewhere is not
+    # enough: under the filler grammar, ordinary conversation produced hits like
+    # "بابا نیست اون خانم گردو آقا" and "بابا میکنه الان گردو بابا میکنه گرم
+    # خیلی", which contain both words scattered among filler. Roughly a third of
+    # all triggers were this. Requiring the actual phrase removes them.
+    tokens = text.split()
+
+    # Calling the robot is a SHORT utterance. Continuous conversation that
+    # happens to contain the phrase is long — the false positives in the log ran
+    # 7 to 15 words ("بابا میکنه الان گردو بابا میکنه گرم خیلی"), while every
+    # genuine call was 2 or 3. Length separates them cleanly.
+    if len(tokens) > MAX_UTTERANCE_TOKENS:
         return False, 0.0, text
-    words = [w for w in result.get("result", []) if w.get("word") in (WAKE_HEAD, "بابا")]
-    if not words:
+
+    idx = None
+    for i in range(len(tokens) - 1):
+        if tokens[i] == WAKE_HEAD and tokens[i + 1] == "بابا":
+            idx = i
+            break
+    if idx is None:
+        return False, 0.0, text
+
+    # Score only the two words of the phrase itself, positionally — not every
+    # occurrence of either word in the utterance, which let surrounding filler
+    # drag the average around.
+    words = result.get("result", [])
+    if len(words) == len(tokens) and idx + 1 < len(words):
+        pair = words[idx:idx + 2]
+    else:
+        pair = [w for w in words if w.get("word") in (WAKE_HEAD, "بابا")]
+    if not pair:
         return True, 1.0, text          # no per-word data; grammar match alone
-    conf = sum(w.get("conf", 0.0) for w in words) / len(words)
+    conf = sum(w.get("conf", 0.0) for w in pair) / len(pair)
     return True, conf, text
 
 
@@ -412,9 +455,36 @@ def main():
             print(f"  could not release the mic: {e}", file=sys.stderr)
 
     stream = open_mic()
+    last_switch_check = 0.0
     try:
         if True:
             while True:
+                # Master switch. "Off" has to mean the microphone is actually
+                # RELEASED, not merely that triggers are ignored — otherwise the
+                # Brio's LED stays lit and the robot is still listening, which is
+                # not what anyone means by off.
+                if args.voice_url and time.time() - last_switch_check >= SWITCH_POLL_S:
+                    last_switch_check = time.time()
+                    off = voice_disabled(args.voice_url)
+                    if off and stream is not None:
+                        close_mic(stream)
+                        stream = None
+                        print("  voice disabled; microphone released", flush=True)
+                        if logfh:
+                            logfh.write("  voice disabled; microphone released\n")
+                    elif not off and stream is None:
+                        stream = open_mic()
+                        with q.mutex:
+                            q.queue.clear()
+                        rec.Reset()
+                        print("  voice enabled; listening again", flush=True)
+                        if logfh:
+                            logfh.write("  voice enabled; listening again\n")
+
+                if stream is None:
+                    time.sleep(0.5)      # switched off: nothing to decode
+                    continue
+
                 data = to_model_rate(q.get(), decim, args.gain)
                 if rectrack:
                     rectrack.writeframes(data)
@@ -449,6 +519,17 @@ def main():
                 print(line, flush=True)
                 if logfh:
                     logfh.write(line + "\n")
+                # Master switch. Checked before the chime, so a disabled robot
+                # stays completely silent rather than announcing a wake it will
+                # not act on.
+                if args.voice_url and voice_disabled(args.voice_url):
+                    print("  voice disabled in the panel; ignoring", flush=True)
+                    if logfh:
+                        logfh.write("  voice disabled in the panel; ignoring\n")
+                    rec.Reset()
+                    last_fire = time.time()
+                    continue
+
                 # Wait for the chime to FINISH before handing over to LiveKit.
                 # The browser joins with its microphone already live, so a chime
                 # still playing out of the speaker becomes the first thing the
