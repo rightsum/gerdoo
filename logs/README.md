@@ -29,6 +29,7 @@ NNN-YYYY-MM-DD-short-title.md
 | [013](013-2026-08-29-audio-and-persian-wake-word.md) | 2026-08-29/30 | USB speaker output, and a Persian wake word ("Gerdoo, baba") via grammar-restricted Vosk | 🔄 Working, tuning false positives · range ~4 m |
 | [014](014-2026-09-01-livekit-voice-agent.md) | 2026-08-30→09-01 | LiveKit voice agent — wake word to real conversation, and the audio-device problems behind it | ✅ Working · 🔄 AEC marginal across two USB clocks |
 | [015](015-2026-09-02-voice-switch-echo-and-language.md) | 2026-09-02 | Voice on/off switch, wake-word false positives, echo filtering that made barge-in usable, selectable recognition language | ✅ Working |
+| [016](016-2026-09-02-agent-tools-search-and-time.md) | 2026-09-02 | Agent tools — web search and a clock with the Persian calendar, so it can answer about the outside world | ✅ Working |
 
 Entries are either **problems** (001, 003) or **design decision records** (002). Both belong here — a decision you cannot reconstruct the reasoning for is as expensive as a bug you cannot reproduce.
 
