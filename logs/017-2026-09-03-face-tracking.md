@@ -101,11 +101,30 @@ body. There were four copies of "the centre" in one short function; three were
 changed. It is now a single `CENTRE_PAN`/`CENTRE_TILT` constant used by all of
 them.
 
-**`/api/servo` reports stale data.** It shells out to `cat` on a serial console
-shared with the 1 Hz heartbeat stream, then returns whichever line happens to
+**`/api/servo` reported stale data.** It shelled out to `cat` on a serial console
+shared with the 1 Hz heartbeat stream, then returned whichever line happened to
 match. It reported `tilt=105`, `95` and `120` within six seconds while the real
 target never moved — those were echoes of earlier commands still in the buffer.
-It cost several rounds of chasing a fault that was not there. **Not yet fixed.**
+It cost several rounds of chasing a fault that was not there.
+
+**Fixed the same day.** Five faults in one short function: it never flushed, so
+buffered output was read as the answer; it matched any line containing `SERVO`
+and `set`, including old echoes; it held no lock, so concurrent requests
+interleaved on one port; it hardcoded the board's serial number in the device
+path; and it interpolated the command into a shell string.
+
+`teensy.py` replaces it using stdlib `termios` — pyserial is not installed on
+this board. It flushes input **before** writing, reads until a line actually
+answers *this* command, holds a lock, and resolves the port by glob. **7 ms per
+read, down from about 450 ms**, and identical across repeated and concurrent
+reads.
+
+> The first deploy returned `SERVO usage: SERVO pan=90 tilt=90  (0-180)`, because
+> bare `SERVO` prints usage first and the position second — so the matcher took
+> the help text and reported its example values as the position. There was a test
+> for exactly that case, written against the string `"SERVO usage"` rather than
+> the firmware's real output, so it passed while the bug was live. Same lesson as
+> the tilt-direction test: a test written from an assumed output proves nothing.
 
 ## Tilt tracked the wrong way
 
@@ -137,8 +156,6 @@ which way a servo turns.
 
 ## Open
 
-- **`/api/servo` is unreliable** and actively misleading. It is the panel's only
-  feedback about where the neck is.
 - **Pan direction is unverified** — only tilt was wrong in testing, but the same
   class of error applies.
 - Camera start costs 1–2 s, so tracking begins slightly after the greeting.

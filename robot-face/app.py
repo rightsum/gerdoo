@@ -24,6 +24,7 @@ from werkzeug.security import check_password_hash
 
 import lidar
 import face_track
+import teensy
 from camera import camera, CameraError
 import voice
 
@@ -630,51 +631,31 @@ def api_battery():
         return jsonify({"main_battery": None, "jetson_battery": None})
 
 # ---- Servo (neck pan/tilt) ----
-import subprocess as _sp
-
-def _send_teensy(cmd):
-    """Send a command to the Teensy console and return its response."""
-    try:
-        port = "/dev/serial/by-id/usb-Teensyduino_Dual_Serial_19627940-if00"
-        p = _sp.Popen(["cat", port], stdout=_sp.PIPE, stderr=_sp.PIPE)
-        import time as _t; _t.sleep(0.15)
-        _sp.run(["bash", "-c", f"echo {cmd} > {port}"])
-        _t.sleep(0.3)
-        p.terminate()
-        out = p.stdout.read().decode()
-        for line in out.strip().split("\n"):
-            if "SERVO" in line and "set" in line:
-                return line
-        return out.strip().split("\n")[-1] if out.strip() else "no response"
-    except Exception as e:
-        return str(e)
 
 @app.route("/api/servo")
 def api_servo_get():
-    r = _send_teensy("SERVO")
-    # Parse "SERVO set pan=20 tilt=160" or "SERVO current pan=45 tilt=135"
-    pan = tilt = None
-    for part in r.split():
-        if part.startswith("pan="): pan = int(part[4:])
-        if part.startswith("tilt="): tilt = int(part[5:])
-    return jsonify({"pan": pan, "tilt": tilt, "raw": r})
+    """Where the neck is pointing, according to the firmware."""
+    try:
+        (pan, tilt), raw = teensy.servo_get()
+    except teensy.TeensyError as e:
+        return jsonify(error=str(e)), 503
+    return jsonify({"pan": pan, "tilt": tilt, "raw": raw})
+
 
 @app.route("/api/servo", methods=["POST"])
 def api_servo_set():
-    data = request.get_json(force=True)
-    pan = data.get("pan")
-    tilt = data.get("tilt")
-    cmd_parts = []
-    if pan is not None: cmd_parts.append(f"pan={int(pan)}")
-    if tilt is not None: cmd_parts.append(f"tilt={int(tilt)}")
-    if not cmd_parts:
+    """Move the neck. The firmware clamps to its own limits."""
+    data = request.get_json(force=True, silent=True) or {}
+    pan, tilt = data.get("pan"), data.get("tilt")
+    if pan is None and tilt is None:
         return jsonify({"error": "no pan or tilt specified"}), 400
-    r = _send_teensy("SERVO " + " ".join(cmd_parts))
-    pan = tilt = None
-    for part in r.split():
-        if part.startswith("pan="): pan = int(part[4:])
-        if part.startswith("tilt="): tilt = int(part[5:])
-    return jsonify({"pan": pan, "tilt": tilt, "raw": r})
+    try:
+        (pan, tilt), raw = teensy.servo_set(pan, tilt)
+    except (ValueError, TypeError):
+        return jsonify({"error": "pan and tilt must be numbers"}), 400
+    except teensy.TeensyError as e:
+        return jsonify(error=str(e)), 503
+    return jsonify({"pan": pan, "tilt": tilt, "raw": raw})
 
 
 if __name__ == "__main__":
