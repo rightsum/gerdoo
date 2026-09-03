@@ -22,8 +22,8 @@ from flask import (
 )
 from werkzeug.security import check_password_hash
 
-import gesture
 import lidar
+import face_track
 from camera import camera, CameraError
 import voice
 
@@ -154,6 +154,12 @@ def sensor_guard():
     camera feed of someone's home, or for spinning up hardware. So these
     endpoints require a password to actually EXIST, not merely a session.
     """
+    # Processes on this machine are already inside the trust boundary — the
+    # face tracker starts the camera for the duration of a voice call, and it
+    # has no session to log in with. This is the same latitude the wake-word
+    # service and the frame endpoint already get.
+    if local_only():
+        return None
     if not logged_in():
         return jsonify(error="unauthorized"), 401
     if not password_is_set():
@@ -248,6 +254,34 @@ def stt_language():
     """Panel-selected speech-recognition language: auto, fa or en."""
     code = load_config().get("stt_language", "auto")
     return code if voice.is_valid_language(code) else "auto"
+
+
+@app.route("/api/facetrack/status")
+def api_facetrack_status():
+    if not local_only() and not logged_in():
+        return jsonify(error="unauthorized"), 401
+    return jsonify(face_track.status())
+
+
+@app.route("/api/facetrack/<action>", methods=["POST"])
+def api_facetrack_control(action):
+    """
+    Start or stop the tracker. The tracker itself decides when to look — it
+    only moves the neck during a voice call — so this is a master switch, not
+    a "track now" button.
+    """
+    guard = sensor_guard()
+    if guard:
+        return guard
+    if action == "start":
+        ok, out = face_track.start()
+    elif action == "stop":
+        ok, out = face_track.stop()
+    else:
+        return jsonify(error="unknown action"), 400
+    if not ok:
+        return jsonify(error=out or "systemctl failed"), 500
+    return jsonify(face_track.status())
 
 
 @app.route("/api/voice/language", methods=["GET", "POST"])
@@ -409,8 +443,8 @@ def control():
         state=load_state(),
         has_password=bool(cfg.get("password_hash")),
         camera_present=camera.status()["present"],
+        facetrack_installed=face_track.unit_installed(),
         lidar_installed=lidar.unit_installed(),
-        gesture_installed=gesture.unit_installed(),
     ))
     resp.headers["Cache-Control"] = "no-store, must-revalidate"
     return resp
@@ -572,7 +606,7 @@ def api_lidar_stream():
 # ---- Gesture detection (auth + password required) ----
 @app.route("/api/camera/frame.jpg")
 def api_camera_frame():
-    """Single latest frame, for the local gesture detector.
+    """Single latest frame, for the local face tracker.
 
     Localhost only. V4L2 allows one reader and this process owns the camera,
     so the detector cannot open the device itself — it gets frames from here.
@@ -586,80 +620,6 @@ def api_camera_frame():
                         headers={"Cache-Control": "no-store"})
     return jsonify(error="camera not running"), 503
 
-
-@app.route("/api/gesture/status")
-def api_gesture_status():
-    guard = sensor_guard()
-    if guard:
-        return guard
-    return jsonify(gesture.status())
-
-
-@app.route("/api/gesture/<action>", methods=["POST"])
-def api_gesture_control(action):
-    guard = sensor_guard()
-    if guard:
-        return guard
-    if action == "start":
-        # Detection is meaningless without frames, so bring the camera up too
-        # rather than leaving the detector polling a dead endpoint.
-        try:
-            camera.start()
-        except CameraError as exc:
-            return jsonify(error=str(exc)), 503
-        ok, out = gesture.start()
-    elif action == "stop":
-        ok, out = gesture.stop()          # camera left alone; it may be in use
-    else:
-        return jsonify(error="unknown action"), 400
-    if not ok:
-        return jsonify(error=out), 503
-    status = gesture.status()
-    status["message"] = out
-    return jsonify(status)
-
-
-@app.route("/api/gesture/ingest", methods=["POST"])
-def api_gesture_ingest():
-    if not local_only():
-        return jsonify(error="forbidden"), 403
-    det = request.get_json(silent=True)
-    if det is None or "gesture" not in det:
-        return jsonify(error="bad detection"), 400
-    gesture.ingest(det)
-    return jsonify(ok=True)
-
-
-@app.route("/api/gesture/stream")
-def api_gesture_stream():
-    guard = sensor_guard()
-    if guard:
-        return guard
-    q = gesture.subscribe()
-
-    def stream():
-        cur = gesture.latest()
-        if cur:
-            yield "data: " + json.dumps(cur) + "\n\n"
-        try:
-            while True:
-                try:
-                    yield "data: " + q.get(timeout=15) + "\n\n"
-                except queue.Empty:
-                    yield ": keepalive\n\n"
-        finally:
-            gesture.unsubscribe(q)
-
-    return Response(
-        stream(),
-        mimetype="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no",
-                 "Connection": "keep-alive"},
-    )
-
-
-# ---- Battery ----
-BATTERY_FILE = "/tmp/battery_status.json"
 
 @app.route("/api/battery")
 def api_battery():

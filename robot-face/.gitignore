@@ -6,3 +6,4 @@ state.json
 
 # Personal — the robot's address. Copy from deploy.env.example.
 deploy/deploy.env
+face-track.log

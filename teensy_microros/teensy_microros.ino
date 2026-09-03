@@ -176,19 +176,61 @@ Servo servoPan;
 Servo servoTilt;
 const int SERVO_PAN_PIN = 2;
 const int SERVO_TILT_PIN = 3;
-int servoPanPos = 90;   // 0-180 degrees, 90 = center
-int servoTiltPos = 90;
+// Straight ahead on this bracket, found by adjustment — not the midpoint of
+// the servo range, because the gimbal is not mounted symmetrically.
+int servoPanPos = 110;
+int servoTiltPos = 110;
 const int SERVO_PAN_MIN = 70;   // pan limits
 const int SERVO_PAN_MAX = 140;
 const int SERVO_TILT_MIN = 60;  // tilt limits
 const int SERVO_TILT_MAX = 120;
 
-// Smooth motion: ease into target position instead of jumping
-float servoPanCurrent = 90.0;
-float servoTiltCurrent = 90.0;
-const float SERVO_SMOOTH = 0.03;  // 3% of remaining distance per loop iteration
-int lastPanWritten = 90;
-int lastTiltWritten = 90;
+// The tilt servo is mounted reversed, so a larger logical angle means a
+// smaller pulse. Wrapped in a function because this has to be applied
+// identically at boot and in the loop; two copies of it would drift.
+static inline void writeTilt(int logical) {
+  servoTilt.write(SERVO_TILT_MAX + SERVO_TILT_MIN - logical);
+}
+
+// Smooth motion.
+//
+// This used to ease by a fixed FRACTION per loop iteration, which sounds gentle
+// until you notice the loop runs at ~999 Hz: 3% of the remaining distance a
+// thousand times a second is a peak of roughly 1200 deg/s. A human neck manages
+// 100-200. It looked and sounded like a machine snapping to position.
+//
+// Now it is time-based and speed-limited, updating at 50 Hz because that is the
+// rate an SG90 actually samples its input — writing faster is churn the servo
+// cannot see.
+const uint32_t SERVO_UPDATE_MS = 20;      // 50 Hz, the servo's own PWM rate
+const float SERVO_MAX_DPS = 70.0;         // top speed, degrees per second
+const float SERVO_EASE_TAU = 0.18;        // seconds; softens the last few degrees
+
+// Holding position is what makes an SG90 buzz. Pan carries no weight against
+// gravity, so once it has settled it can be released and go quiet. Tilt holds
+// the screen up and must stay energised or the head drops.
+const uint32_t PAN_IDLE_DETACH_MS = 1500;
+
+uint32_t lastServoUpdate = 0;
+uint32_t panSettledAt = 0;
+bool panAttached = true;
+
+float servoPanCurrent = 110.0;
+float servoTiltCurrent = 110.0;
+
+// Move `current` toward `target` for one tick: an exponential ease so it settles
+// softly, capped by a top speed so a large jump does not start out violently.
+static inline float easeToward(float current, float target, float dt) {
+  float delta = target - current;
+  if (fabsf(delta) < 0.05f) return (float)target;
+  float step = delta * (dt / SERVO_EASE_TAU);
+  float cap = SERVO_MAX_DPS * dt;
+  if (step > cap) step = cap;
+  if (step < -cap) step = -cap;
+  return current + step;
+}
+int lastPanWritten = 110;
+int lastTiltWritten = 110;
 
 // How often to look for an agent while disconnected. Cheap ping, so half a
 // second keeps reconnection prompt without flooding the link.
@@ -513,6 +555,14 @@ void setup() {
   servoPanCurrent = servoPanPos;
   servoTiltCurrent = servoTiltPos;
 
+  // Command the servos NOW. The loop only writes when the value changes, and
+  // lastPanWritten/lastTiltWritten start equal to the target — so without this
+  // the servos are never driven at boot. They hold whatever position they
+  // powered up in while the firmware reports the centre, and the first nudge
+  // then snaps them across the whole error in about a tenth of a second.
+  servoPan.write(servoPanPos);
+  writeTilt(servoTiltPos);
+
   set_microros_transports();   // uses our SerialUSB1 overrides
 
   bootMillis    = millis();
@@ -527,18 +577,37 @@ void setup() {
 void loop() {
   loopCount++;
 
-  // --- Smooth servo motion (eases toward target) ---
-  servoPanCurrent += (servoPanPos - servoPanCurrent) * SERVO_SMOOTH;
-  servoTiltCurrent += (servoTiltPos - servoTiltCurrent) * SERVO_SMOOTH;
-  int newPan = (int)(servoPanCurrent + 0.5);
-  int newTilt = (int)(servoTiltCurrent + 0.5);
-  if (newPan != lastPanWritten) {
-    servoPan.write(newPan);
-    lastPanWritten = newPan;
-  }
-  if (newTilt != lastTiltWritten) {
-    servoTilt.write(SERVO_TILT_MAX + SERVO_TILT_MIN - newTilt);  // reversed mount
-    lastTiltWritten = newTilt;
+  // --- Smooth servo motion: time-based, speed-limited, 50 Hz ---
+  uint32_t nowMs = millis();
+  if (nowMs - lastServoUpdate >= SERVO_UPDATE_MS) {
+    float dt = (nowMs - lastServoUpdate) / 1000.0f;
+    lastServoUpdate = nowMs;
+    if (dt > 0.2f) dt = 0.2f;             // after a stall, do not lurch
+
+    servoPanCurrent  = easeToward(servoPanCurrent,  servoPanPos,  dt);
+    servoTiltCurrent = easeToward(servoTiltCurrent, servoTiltPos, dt);
+
+    int newPan = (int)(servoPanCurrent + 0.5);
+    int newTilt = (int)(servoTiltCurrent + 0.5);
+
+    if (newPan != lastPanWritten) {
+      if (!panAttached) {                 // woken: drive it again
+        servoPan.attach(SERVO_PAN_PIN);
+        panAttached = true;
+      }
+      servoPan.write(newPan);
+      lastPanWritten = newPan;
+      panSettledAt = nowMs;
+    } else if (panAttached && panSettledAt &&
+               nowMs - panSettledAt > PAN_IDLE_DETACH_MS) {
+      servoPan.detach();                  // settled and still: stop buzzing
+      panAttached = false;
+    }
+
+    if (newTilt != lastTiltWritten) {
+      writeTilt(newTilt);
+      lastTiltWritten = newTilt;
+    }
   }
   pollConsole();          // always works, in every agent state
 

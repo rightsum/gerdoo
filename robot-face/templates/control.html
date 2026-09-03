@@ -87,30 +87,6 @@
     .rangebar input { flex: 1; accent-color: #5b8cff; }
     .locked { padding: 14px 16px; font-size: 13px; color: #ffe0a3;
       background: rgba(255,180,0,0.08); border-top: 1px solid rgba(255,180,0,0.2); }
-    .gesture-badge { position: absolute; left: 12px; top: 12px; display: none;
-      align-items: center; gap: 9px; padding: 8px 14px 8px 11px; border-radius: 12px;
-      background: rgba(7,13,28,0.82); border: 1px solid rgba(255,255,255,0.14);
-      backdrop-filter: blur(6px); font-size: 14px; font-weight: 600; color: #e8ecf6; }
-    .gesture-badge.show { display: flex; }
-    .gesture-badge.fist { border-color: #37d67a; box-shadow: 0 0 0 1px #37d67a inset, 0 0 22px -4px #37d67a; }
-    .gesture-badge #gesture-emoji { font-size: 22px; line-height: 1; }
-    /* Tracking reticle — position comes from the hand landmarks, so it shows
-       exactly what a neck-tracking loop would be aiming at. */
-    .reticle { position: absolute; width: 62px; height: 62px; margin: -31px 0 0 -31px;
-      border: 2px solid #37d67a; border-radius: 50%; display: none; pointer-events: none;
-      box-shadow: 0 0 16px -2px #37d67a, 0 0 0 1px rgba(0,0,0,.4) inset;
-      transition: left .09s linear, top .09s linear; }
-    .reticle.show { display: block; }
-    .reticle::before, .reticle::after { content: ''; position: absolute; background: #37d67a; }
-    .reticle::before { left: 50%; top: -9px; width: 1px; height: 12px; }
-    .reticle::after { top: 50%; left: -9px; height: 1px; width: 12px; }
-    .reticle.tracking-fist { border-color: #ffd34d; box-shadow: 0 0 20px -2px #ffd34d; }
-    .reticle.tracking-fist::before, .reticle.tracking-fist::after { background: #ffd34d; }
-    .track-readout { position: absolute; right: 12px; bottom: 12px; display: none;
-      font-family: ui-monospace, monospace; font-size: 11px; color: #9fb3d9;
-      background: rgba(7,13,28,0.8); padding: 6px 10px; border-radius: 8px;
-      border: 1px solid rgba(255,255,255,0.1); line-height: 1.5; }
-    .track-readout.show { display: block; }
   </style>
 </head>
 <body>
@@ -187,7 +163,7 @@
     
         <div class="stage" id="cam-stage">        <div id="servo-controls" style="display:none;position:absolute;top:8px;right:8px;z-index:10;background:rgba(10,16,28,0.85);border:1px solid #2a3a5a;border-radius:8px;padding:8px">
           <div style="font-size:10px;color:#8493b3;text-align:center;margin-bottom:4px">NECK</div>
-          <div style="font-size:11px;color:#8493b3;font-family:ui-monospace,monospace;text-align:center;margin-bottom:6px" id="servo-pos">110,90</div>
+          <div style="font-size:11px;color:#8493b3;font-family:ui-monospace,monospace;text-align:center;margin-bottom:6px" id="servo-pos">110,110</div>
           <div style="display:grid;grid-template-columns:26px 26px 26px;grid-template-rows:26px 26px 26px;gap:2px">
             <div></div>
             <button onclick="servoMove(0,5)" style="font-size:13px;cursor:pointer;border:1px solid #2a3a5a;border-radius:3px;background:rgba(26,36,56,0.9);color:#e0e6f0">&uarr;</button>
@@ -202,20 +178,20 @@
         </div>
 
           <img id="cam-img" alt="Camera stream">
-          <div class="gesture-badge" id="gesture-badge"><span id="gesture-emoji">✊</span><span id="gesture-name"></span></div>
-          <div class="reticle" id="reticle"></div>
-          <div class="track-readout" id="track-readout"></div>
         </div>
         <p class="hint" id="cam-hint"></p>
         <div class="rangebar" style="margin-top:14px">
-          <span>Gesture detection</span>
+          <span>Face tracking</span>
           <span style="flex:1"></span>
-          <span class="status" id="gesture-status"><span class="led"></span><span id="gesture-status-text">off</span></span>
-          <button class="toggle" id="gesture-toggle" aria-label="Toggle gesture detection"
-                  {% if not gesture_installed %}disabled{% endif %}></button>
+          <span class="status" id="ft-status"><span class="led"></span><span id="ft-status-text">off</span></span>
+          <button class="toggle" id="ft-toggle" aria-label="Toggle face tracking"
+                  {% if not facetrack_installed %}disabled{% endif %}></button>
         </div>
-        {% if not gesture_installed %}
-        <p class="hint">Gesture unit not installed — run <code>./deploy/deploy.sh</code></p>
+        <p class="hint">Turns the neck toward whoever the robot is talking to.
+        Only moves during a voice call — it starts the camera then, and stops it
+        after.</p>
+        {% if not facetrack_installed %}
+        <p class="hint">Face-track unit not installed — run <code>./deploy/deploy.sh</code></p>
         {% endif %}
       </div>
       {% if not camera_present %}
@@ -540,128 +516,40 @@
       try { lidarReflect(await api('/api/lidar/status')); } catch {}
     }, 3000);
 
-    // ---- Gesture detection ----
-    const gToggle = document.getElementById('gesture-toggle');
-    const gStatus = document.getElementById('gesture-status');
-    const gText   = document.getElementById('gesture-status-text');
-    const gBadge  = document.getElementById('gesture-badge');
-    const gEmoji  = document.getElementById('gesture-emoji');
-    const gName   = document.getElementById('gesture-name');
-    let gOn = false, gES = null;
+    // ---- Face tracking ----
+    const ftToggle = document.getElementById('ft-toggle');
+    const ftStatus = document.getElementById('ft-status');
+    const ftText   = document.getElementById('ft-status-text');
+    let ftOn = false;
 
-    const GESTURE_EMOJI = {
-      Closed_Fist: '✊', Open_Palm: '✋', Pointing_Up: '☝️', Thumb_Up: '👍',
-      Thumb_Down: '👎', Victory: '✌️', ILoveYou: '🤟',
-    };
-
-    const reticle  = document.getElementById('reticle');
-    const readout  = document.getElementById('track-readout');
-
-    // ---- Fist tracking state ----
-    let fistTracking = false;
-    let savedMood = null;
-    let lastServoTrack = 0;
-    const TRACK_GAIN = 30;       // degrees of servo movement per unit error
-    const TRACK_DEADZONE = 0.03; // ignore tiny errors (prevents jitter)
-    const TRACK_INTERVAL = 250;  // ms between servo corrections (throttle)
-
-    function showGesture(d) {
-      // --- classification badge ---
-      if (!d || !d.gesture) {
-        gBadge.classList.remove('show', 'fist');
-      } else {
-        gEmoji.textContent = GESTURE_EMOJI[d.gesture] || '👋';
-        gName.textContent = d.gesture.replace(/_/g, ' ')
-          + (d.score ? '  ' + Math.round(d.score * 100) + '%' : '');
-        gBadge.classList.add('show');
-        gBadge.classList.toggle('fist', !!d.is_fist);
-      }
-
-      // --- Fist tracking: mood change + neck follows fist ---
-      const p = d && d.pos;
-      const isFist = !!(d && d.is_fist);
-      if (isFist && !fistTracking) {
-        // Enter tracking mode: save mood, switch to love
-        fistTracking = true;
-        fetch('/api/state').then(r => r.json()).then(s => {
-          savedMood = s.mood || 'auto';
-          fetch('/api/state', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({mood:'love'})});
-        }).catch(() => {});
-      } else if (!isFist && fistTracking) {
-        // Exit tracking mode: restore mood
-        fistTracking = false;
-        if (savedMood) {
-          fetch('/api/state', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({mood:savedMood})});
-          savedMood = null;
-        }
-      }
-      // While tracking, adjust neck to center the fist
-      if (fistTracking && p && p.err_x !== undefined) {
-        const now = Date.now();
-        if (now - lastServoTrack > TRACK_INTERVAL) {
-          lastServoTrack = now;
-          let dP = 0, dT = 0;
-          if (Math.abs(p.err_x) > TRACK_DEADZONE) dP = Math.round(-p.err_x * TRACK_GAIN);
-          if (Math.abs(p.err_y) > TRACK_DEADZONE) dT = Math.round(-p.err_y * TRACK_GAIN);
-          if (dP !== 0 || dT !== 0) servoMove(dP, dT);
-        }
-      }
-
-      // --- tracking reticle ---, independently of the gesture label,
-      // so the reticle keeps following a hand whose gesture is unrecognised.
-      if (!p) {
-        reticle.classList.remove('show');
-        readout.classList.remove('show');
-        return;
-      }
-      reticle.style.left = (p.x * 100) + '%';
-      reticle.style.top  = (p.y * 100) + '%';
-      reticle.classList.add('show');
-      reticle.classList.toggle('tracking-fist', !!(d && d.is_fist));
-      // err_x/err_y are what a pan/tilt controller consumes directly.
-      readout.innerHTML =
-        'x ' + p.x.toFixed(3) + '  y ' + p.y.toFixed(3) + '<br>' +
-        'err ' + (p.err_x >= 0 ? '+' : '') + p.err_x.toFixed(3) +
-        ' , ' + (p.err_y >= 0 ? '+' : '') + p.err_y.toFixed(3) + '<br>' +
-        'size ' + p.size.toFixed(3);
-      readout.classList.add('show');
+    function ftReflect(st) {
+      ftOn = !!(st && st.active);
+      ftToggle.classList.toggle('on', ftOn);
+      ftStatus.classList.toggle('on', ftOn);
+      ftText.textContent = ftOn ? 'on' : 'off';
     }
 
-    function gReflect(s) {
-      gOn = !!s.active;
-      gToggle.classList.toggle('on', gOn);
-      gStatus.classList.toggle('on', gOn && s.last_age !== null);
-      gText.textContent = gOn ? (s.detections + ' det') : 'off';
-      if (gOn && !gES) {
-        gES = new EventSource('/api/gesture/stream');
-        gES.onmessage = (ev) => { try { showGesture(JSON.parse(ev.data)); } catch {} };
-      }
-      if (!gOn && gES) { gES.close(); gES = null; showGesture(null); }
-      if (gOn) showGesture(s.current);
+    if (ftToggle) {
+      ftToggle.addEventListener('click', async () => {
+        ftToggle.classList.add('busy');
+        try {
+          ftReflect(await api('/api/facetrack/' + (ftOn ? 'stop' : 'start'), 'POST'));
+          showToast(ftOn ? 'Face tracking on' : 'Face tracking off');
+        } catch (e) { showToast(e.message); }
+        finally { ftToggle.classList.remove('busy'); }
+      });
+
+      setInterval(async () => {
+        try { ftReflect(await api('/api/facetrack/status')); } catch {}
+      }, 4000);
+
+      (async () => {
+        try { ftReflect(await api('/api/facetrack/status')); } catch {}
+      })();
     }
 
-    gToggle.addEventListener('click', async () => {
-      gToggle.classList.add('busy');
-      try {
-        gReflect(await api('/api/gesture/' + (gOn ? 'stop' : 'start'), 'POST'));
-        // Starting gestures also starts the camera, so refresh that too.
-        camReflect(await api('/api/camera/status'));
-        showToast(gOn ? 'Gesture detection on' : 'Gesture detection off');
-      } catch (e) { showToast(e.message); }
-      finally { gToggle.classList.remove('busy'); }
-    });
-
-    setInterval(async () => {
-      try { gReflect(await api('/api/gesture/status')); } catch {}
-    }, 4000);
-
-    (async () => {
-      try { camReflect(await api('/api/camera/status')); } catch {}
-      try { lidarReflect(await api('/api/lidar/status')); } catch {}
-      try { gReflect(await api('/api/gesture/status')); } catch {}
-    })();
     {% endif %}
-  
+
     // ---- Battery ----
     async function pollBattery() {
       try {
@@ -683,7 +571,10 @@
 
 
     // ---- Neck Servos ----
-    var servoPan = 90, servoTilt = 90;
+    // Straight ahead on this bracket, found by adjustment — not the midpoint
+    // of the servo range, because the gimbal is not mounted symmetrically.
+    const CENTRE_PAN = 110, CENTRE_TILT = 110;
+    var servoPan = CENTRE_PAN, servoTilt = CENTRE_TILT;
     async function servoUpdate() {
       try {
         const r = await fetch('/api/servo');
@@ -708,11 +599,17 @@
       } catch {}
     }
     async function servoCenter() {
-      servoPan = 110; servoTilt = 90;
+      // Straight ahead, measured on the real robot. The bracket is not
+      // mounted symmetrically, so this is not the midpoint of the servo range.
+      // One source of truth for the centre, so the label and the request can
+      // never disagree again — they did, and the panel spent a while claiming
+      // 110 while posting 90.
+      servoPan = CENTRE_PAN; servoTilt = CENTRE_TILT;
       var el = document.getElementById('servo-pos');
-      if (el) el.textContent = 'pan=110 tilt=90';
+      if (el) el.textContent = 'pan=' + CENTRE_PAN + ' tilt=' + CENTRE_TILT;
       try {
-        await fetch('/api/servo', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({pan:110, tilt:90})});
+        await fetch('/api/servo', {method:'POST', headers:{'Content-Type':'application/json'},
+                                   body:JSON.stringify({pan:CENTRE_PAN, tilt:CENTRE_TILT})});
       } catch {}
     }
     // Show/hide servo controls when camera toggles

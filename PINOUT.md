@@ -49,7 +49,7 @@
 | Pin | Function | Status |
 |---|---|---|
 | **2** | Neck pan servo (SG90, yaw) | ✅ Wired |
-| **3** | Neck tilt servo (SG90, pitch) | ✅ Wired |
+| **3** | Neck tilt servo (SG90, pitch) | ✅ Wired — **mounted reversed**, see below |
 | **4** | COB LED strip via D4184 MOSFET module, 18 kHz | ✅ Wired |
 
 ### A0 — Main battery voltage sensor
@@ -111,6 +111,27 @@ See [`logs/012`](logs/012-2026-08-26-led-strip-ambient-brightness.md).
 **PWM frequency: 18 kHz.** Inside the D4184's 0–20 kHz spec, above adult hearing so the
 strip does not whine, and far above any camera shutter so it cannot band the OV9281s
 or the Brio.
+
+### Neck servos — centre, direction and motion
+
+**Straight ahead is `pan=110 tilt=110`.** Measured on the robot, not the midpoint
+of the servo range: the gimbal is not mounted symmetrically. The same pair is used
+by the firmware's boot position, the panel's centre button and the face tracker.
+
+⚠️ **The tilt servo is mounted reversed.** The firmware writes
+`TILT_MAX + TILT_MIN - angle` via `writeTilt()`, and the face tracker applies a
+second inversion on top (`tilt_inverted=True`). Both were established by watching
+the real robot; neither is derivable.
+
+⚠️ **The servos must be written explicitly in `setup()`.** The loop only writes on
+change, so without a boot write they hold whatever position they powered up in
+while the firmware reports the centre.
+
+**Motion:** 50 Hz updates (an SG90 samples no faster), capped at 70 deg/s with an
+exponential ease. Pan detaches after 1.5 s of stillness to stop it buzzing; tilt
+stays energised because it carries the screen's weight.
+
+See [`logs/017`](logs/017-2026-09-03-face-tracking.md).
 
 ## micro-ROS topics
 

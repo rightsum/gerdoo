@@ -1,0 +1,16 @@
+[Unit]
+Description=Face tracking — points the neck at whoever the robot is talking to
+After=robot-face.service
+Wants=robot-face.service
+
+[Service]
+Type=simple
+Environment=PYTHONUNBUFFERED=1
+WorkingDirectory=%h/robot-face
+# The gesture detector's venv, which already has mediapipe and opencv.
+ExecStart=%h/gesture-venv/bin/python %h/robot-face/face_tracker.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
