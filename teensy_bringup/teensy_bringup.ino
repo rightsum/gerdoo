@@ -2,8 +2,8 @@
   Teensy 4.1 bring-up / health check
 
   Step 1 of the Teensy migration. No peripherals are touched: nothing is
-  wired yet, and until the bench measurements in ACTION-PLAN.md section B
-  are done, driving any pin risks pushing 5V into a part that clamps at 3.6V.
+  wired yet, and until the bench measurements are
+  done, driving any pin risks pushing 5V into a part that clamps at 3.6V.
 
   This firmware only proves the link is healthy:
     - USB Type must be Serial, so the board enumerates as 16c0:0483 and

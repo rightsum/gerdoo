@@ -324,7 +324,7 @@ async def entrypoint(ctx: JobContext):
     @session.on("user_input_transcribed")
     def _on_user_speech(ev):
         # Only final transcripts count. Partials are unstable, and acting on
-        # them is what made the wake word fire mid-sentence (see logs/013).
+        # them is what made the wake word fire mid-sentence.
         if not getattr(ev, "is_final", False):
             return
         text = getattr(ev, "transcript", "") or ""

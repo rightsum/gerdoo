@@ -12,12 +12,12 @@
 #   make ports     - show what is detected and in which USB mode
 #   make clean
 #
-# Three things this file works around, all learned the hard way — see logs/003:
+# Three things this file works around, all learned the hard way:
 #   1. usb=serial must be pinned in the FQBN or the board can land in RawHID,
 #      where no /dev/ttyACM* can ever appear.
 #   2. Flashing uses teensy_loader_cli, NOT arduino-cli upload. arduino-cli
 #      delegates to teensy_post_compile, which does not flash — it messages the
-#      Teensy Loader GUI, which is GTK and dies headless. See logs/005.
+#      Teensy Loader GUI, which is GTK and dies headless.
 #   3. /dev/ttyACM<N> is NOT stable — observed moving 0 -> 1 -> 0 with nothing
 #      unplugged. Always address the board by its by-id serial-number symlink.
 

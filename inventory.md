@@ -7,8 +7,7 @@
 > **Servo Controller:** PCA9685 16-Channel PWM Driver (see Servos & Motor Control)
 > **Navigation:** RPLIDAR C1 360° LiDAR (see Navigation & LiDAR)
 > **Batteries:** Samsung 21700 cells (see Power & Battery)
-> **Wiring reference:** this file. `PINOUT.md` documents the legacy Arduino Nano build and is **stale** — do not use it for the Teensy 4.1 wiring.
-> **Decisions and bring-up write-ups:** [`logs/`](logs/README.md) · **Scheduled work:** [`ACTION-PLAN.md`](ACTION-PLAN.md)
+> **Wiring reference:** this file
 
 ---
 
@@ -22,7 +21,7 @@ Two independent paths. **The USB one survives every wifi failure** and needs no 
 | **USB gadget** | `ssh user@192.168.55.1` | Mac side `192.168.55.100` on `en21`. ~1.2 ms. Independent of wifi, DHCP and the router |
 | **Serial console** | `/dev/cu.usbmodem*` on the Mac | Last resort if networking is entirely gone |
 
-⚠️ **Wifi power save must stay disabled.** Ubuntu ships `wifi.powersave = 3`; the Realtek `rtl88x2ce` then stops answering inbound packets while idle — the box can reach you but you cannot reach it. Set to `2` in `/etc/NetworkManager/conf.d/default-wifi-powersave-on.conf`. Verify: `iw dev wlP1p1s0 get power_save` → `off`. See [`logs/001`](logs/001-2026-08-04-jetson-wifi-unreachable.md).
+⚠️ **Wifi power save must stay disabled.** Ubuntu ships `wifi.powersave = 3`; the Realtek `rtl88x2ce` then stops answering inbound packets while idle — the box can reach you but you cannot reach it. Set to `2` in `/etc/NetworkManager/conf.d/default-wifi-powersave-on.conf`. Verify: `iw dev wlP1p1s0 get power_save` → `off`..
 
 ### Stable device paths — never hardcode `/dev/ttyACM<N>` or `/dev/ttyUSB<N>`
 
@@ -43,8 +42,8 @@ These are keyed on each device's own serial number, so they also disambiguate bo
 
 | Unit | Purpose |
 |---|---|
-| `systemctl --user status micro-ros-agent` | Teensy ↔ ROS 2 bridge. `Restart=always` ([`logs/007`](logs/007-2026-08-04-microros-bringup.md)) |
-| `systemctl --user status robot-face` | kiosk face on the 5.5" panel, **plus the `/control` panel** — mood, eye colour, camera stream, live LiDAR view ([`logs/006`](logs/006-2026-08-04-robot-face-adoption.md), [`logs/008`](logs/008-2026-08-04-control-panel-camera-lidar.md)) |
+| `systemctl --user status micro-ros-agent` | Teensy ↔ ROS 2 bridge. `Restart=always` |
+| `systemctl --user status robot-face` | kiosk face on the 5.5" panel, **plus the `/control` panel** — mood, eye colour, camera stream, live LiDAR view |
 | `systemctl --user status rplidar` | lidar driver + `/scan` bridge. **On demand only** — `static` unit, started by the control panel, never at boot |
 
 > The panel is **owned by the kiosk**, full-screen. It is not a spare terminal — do not expect a usable desktop there.
@@ -173,7 +172,7 @@ These are keyed on each device's own serial number, so they also disambiguate bo
 - **CAN Bus:** 3 CAN ports for automotive-style robot communication
 - **Companion to Jetson:** Handles real-time motor/servo control while Jetson runs AI/vision workloads
 - **LiDAR:** ❌ **not on the Teensy.** RPLIDAR C1 goes to a Jetson USB port via its CP2102N adapter — it already contains its own MCU, so the Teensy would only be a middleman. `Serial1` is **free**. See Navigation & LiDAR section
-- **ROS 2:** runs micro-ROS as `/teensy_node` over **Dual Serial** (`usb=serial2`) — `if02` carries XRCE-DDS, `if00` stays a human console. Agent is a systemd user service on the Jetson. See [`logs/007`](logs/007-2026-08-04-microros-bringup.md)
+- **ROS 2:** runs micro-ROS as `/teensy_node` over **Dual Serial** (`usb=serial2`) — `if02` carries XRCE-DDS, `if00` stays a human console. Agent is a systemd user service on the Jetson.
 - **Ultrasonic:** use the **HC-SR04P** (3.3V, direct connect). The classic 5V HC-SR04 needs a resistor divider on ECHO — pins are not 5V tolerant. Wiring tables in Sensors section
 
 ---
@@ -588,7 +587,6 @@ Datasheet Figure 2-6. Five-position housing, four wires used. **No MOTOCTL pin o
 > ```bash
 > printf "\xA5\x25" > /dev/ttyUSB0     # RPLIDAR protocol: A5 25 = STOP
 > ```
-> See [`logs/009`](logs/009-2026-08-04-lidar-motor-kept-spinning.md).
 
 | Wire | Signal | Type | Min | Typ | Max |
 |---|---|---|---|---|---|
@@ -623,7 +621,7 @@ Datasheet note: voltage measured **at the lidar connector** must read above 5V d
 
 #### Connection — Jetson USB (NOT the Teensy)
 
-> **Decided 2026-08-04, verified working.** The C1 goes to a **Jetson USB port via its bundled adapter**. It is not wired to the Teensy. See [`logs/002`](logs/002-2026-08-04-usb-topology-and-peripheral-split.md) for the reasoning and [`logs/004`](logs/004-2026-08-04-rplidar-c1-bringup.md) for the bring-up.
+> **Decided 2026-08-04, verified working.** The C1 goes to a **Jetson USB port via its bundled adapter**. It is not wired to the Teensy. 
 
 The C1 contains its own microcontroller — it fires the laser, times the return, tracks rotor angle, and hands over **finished measurements**. There is no timing-critical work left for a co-processor to do. Putting the Teensy in between would make it a middleman copying bytes, while:
 
@@ -809,7 +807,7 @@ Design rule: **the power rails carry power only — never a signal that touches 
 
 #### ✅ Resolved 2026-08-26: two separate 5V rails
 
-Answered by the LED strip bring-up — see [`logs/012`](logs/012-2026-08-26-led-strip-ambient-brightness.md).
+Answered by the LED strip bring-up.
 
 | Rail | Converter | Feeds | Why separate |
 |---|---|---|---|
@@ -1105,7 +1103,7 @@ Set both with a meter and **no pack connected**, then connect. Add a **Schottky 
 lit the load at full — but no drive turned the FET on: not 3.3V from a Teensy pin
 (either wire orientation), and not 5V jumpered straight to the header. Connecting it
 also dragged the driving pin to 0V. Replaced by the D4184 module below, which worked on
-the first bench test. Full debug trail in [`logs/012`](logs/012-2026-08-26-led-strip-ambient-brightness.md).
+the first bench test. 
 - **Specs:**
   - MOSFET: LR7843 (also covers FR120N, AOD4184, D4184)
   - Voltage: 100V/30V (depends on variant)
@@ -1300,8 +1298,7 @@ Logic-level parts that do work: **AOD4184/D4184**, **IRLZ44N**, **IRLB8721**.
   - **Voltage: 5V** — measured 2026-08-26, was open item 2
   - Use case: Robot illumination / lighting
 - **In service 2026-08-26:** dedicated MINI560 5V rail → D4184 MOSFET → Teensy pin 4 PWM
-  at 18 kHz, brightness following the A1 photoresistor. Wiring in `PINOUT.md`,
-  bring-up in [`logs/012`](logs/012-2026-08-26-led-strip-ambient-brightness.md)
+  at 18 kHz, brightness following the A1 photoresistor
 
 ⚠️ **No inline fuse fitted yet.** This branch is currently unprotected — see Fusing.
 
@@ -1317,7 +1314,7 @@ Logic-level parts that do work: **AOD4184/D4184**, **IRLZ44N**, **IRLB8721**.
 puts 5V on a 3.3V ADC pin.
 
 Divider polarity varies by batch. Firmware has an `LDR_BRIGHT_IS_HIGH` constant and
-`CAL dark` / `CAL bright` console commands to handle it — see `PINOUT.md`.
+`CAL dark` / `CAL bright` console commands to handle it.
 
 ---
 
@@ -1347,8 +1344,7 @@ the control that matters — not `pactl set-sink-volume`.
 
 ### 🎙️ Wake word — "Gerdoo, baba" (گردو بابا)
 
-Offline Persian wake-word trigger. Full write-up in
-[`logs/013`](logs/013-2026-08-29-audio-and-persian-wake-word.md).
+Offline Persian wake-word trigger. Full write-up in the wake-word code.
 
 | | |
 |---|---|
@@ -1372,8 +1368,7 @@ from the detector not firing. Use `mpg123` for compressed audio.
 ### 🔊 Audio routing — read before touching anything that captures or plays
 
 The Brio (capture) and the USB speaker (playback) are **two separate USB devices with
-independent clocks**, and that single fact drives everything below. Full write-up in
-[`logs/014`](logs/014-2026-09-01-livekit-voice-agent.md).
+independent clocks**, and that single fact drives everything below.
 
 `wake-word/audio-setup.sh` puts it all back into a known state and runs on every
 wake-word service start. Run it by hand whenever audio misbehaves — it prints what it
@@ -1659,7 +1654,7 @@ Things that need a meter or a look at the physical part, not a datasheet.
 | # | Item | Why it matters |
 |---|---|---|
 | 1 | **XL4015 pot count** — one or two? | Two = CC/CV, charger plan works. One = CV-only, do not charge lithium with it |
-| ~~2~~ | ~~**COB LED strip voltage**~~ | ✅ **ANSWERED 2026-08-26 — it is a 5V strip.** Full brightness on the 5V rail with the MOSFET bypassed. Now on its own MINI560 rail. See [`logs/012`](logs/012-2026-08-26-led-strip-ambient-brightness.md) |
+| ~~2~~ | ~~**COB LED strip voltage**~~ | ✅ **ANSWERED 2026-08-26 — it is a 5V strip.** Full brightness on the 5V rail with the MOSFET bypassed. Now on its own MINI560 rail. |
 | ~~3~~ | ~~MINI560 bench test~~ | ⬇️ **Demoted 2026-08-05** — MINI560 is no longer in the design. All 6 are spares. Only worth testing if a 5V rail comes back |
 | ~~3~~ | ~~❓ **What supplies 5V now**~~ | ✅ **ANSWERED 2026-08-26.** Two rails: **LM2596S** → SG90 servos, **MINI560** → COB LED strip. Split because they interfered on one rail. See Power Rail Architecture |
 | 11 | **COB LED strip current at full brightness** | Meter in series with the strip. Sizes the fuse and confirms the MINI560 headroom. Currently inferred only from a ~200 mV pack sag — **indirect** |
@@ -1671,8 +1666,6 @@ Things that need a meter or a look at the physical part, not a datasheet.
 | 8 | **Camera enumeration** | Set `uvcvideo quirks=128` **first**, then plug both OV9281s in and check `dmesg` for `Not enough bandwidth`. See Vision & Cameras |
 | 9 | **36GP-555 stall current** | Not recorded here — the one hole in the power budget, exactly where the drive base sits. Sets the drive-motor fuse (20A is provisional) |
 | 10 | **Which 5.5" panel is fitted** | The AM-OLED is listed *Pending* and the IPS as *BROKEN*. Touch does not enumerate at all — if the fitted panel is the broken IPS, that is the explanation. See Displays |
-
-Tracked with dates and pass conditions in [`ACTION-PLAN.md`](ACTION-PLAN.md) section B.
 
 ### Migration notes — Arduino Nano → Teensy 4.1
 

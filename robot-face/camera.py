@@ -37,7 +37,7 @@ DEFAULT_DEVICE = "/dev/v4l/by-id/usb-046d_Brio_500_2437ZBD0PNK8-video-index0"
 #
 # The Jetson's wifi is 2.4 GHz and measured ~78 Mbit/s rx, so 1080p would eat
 # most of the link and degrade everything else on it. 720p30 is the default for
-# that reason alone — not CPU. Once wifi moves to 5 GHz (ACTION-PLAN A3),
+# that reason alone — not CPU. Once wifi moves to 5 GHz,
 # 1080p becomes reasonable:
 #
 #   ROBOT_CAMERA_WIDTH=1920 ROBOT_CAMERA_HEIGHT=1080

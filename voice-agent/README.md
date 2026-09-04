@@ -1,7 +1,6 @@
 # Gerdoo voice agent
 
-Runs on the Mac. The Jetson only joins the room — see
-`docs/superpowers/specs/2026-08-30-livekit-voice-agent-design.md`.
+Runs on the Mac. The Jetson only joins the room.
 
 ## Running
 
