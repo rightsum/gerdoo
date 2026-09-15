@@ -7,20 +7,20 @@ Type=simple
 Environment=PYTHONIOENCODING=utf-8
 Environment=PYTHONUNBUFFERED=1
 
-# The Brio's hardware capture gain does not survive a reboot, and the whole
-# reason 4 m worked was getting it to the top of its range. Set it every start.
-# Resolves cards BY NAME and pins PulseAudio's defaults. Replugging the USB hub
-# resets mixer levels and moves the default source to the speaker's own mic,
-# which presents as the robot going deaf mid-call.
+# Builds the XVF3800 mono mic source (gerdoo_mic) and pins PulseAudio's
+# defaults to it. Resolves cards BY NAME; a USB replug resets mixer levels.
 ExecStartPre=-%h/wake-word/audio-setup.sh
 
-# --device-name, not --device: PortAudio indices move between reboots.
-# --gain 3.0 was measured, not guessed: replaying a recorded session showed
-# 18 hits at 1x and 21 at 3x, with 4x and above losing them again to clipping.
+# "pulse" = PulseAudio's default source, i.e. gerdoo_mic: XVF3800 channel 0,
+# already echo-cancelled. Going through PulseAudio (not raw ALSA) also means
+# Firefox and this detector can share the microphone.
+# --gain 1.0: channel 0 has the XVF3800's own AGC. The 3.0 used on the Brio
+# would clip it.
 ExecStart=/usr/bin/python3 %h/wake-word/wake_word.py \
-    --device-name Brio \
+    --device-name pulse \
+    --capture-rate 16000 \
     --mode filler \
-    --gain 3.0 \
+    --gain 1.0 \
     --threshold 0.5 \
     --cooldown 3.0 \
     --sound %h/wake-word/sounds/janam.mp3 \

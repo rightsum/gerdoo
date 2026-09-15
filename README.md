@@ -41,7 +41,8 @@ Everything below is working documentation, written for me and for the agents hel
 Jetson Orin Nano ── ROS 2 Humble ── SLAM, navigation, vision, AI
    │
    ├── USB ── RPLIDAR C1          (own MCU, no co-processor needed)
-   ├── USB ── Logitech Brio 500   (control-panel stream)
+   ├── USB ── Logitech Brio 500   (camera: control-panel stream, face tracking)
+   ├── USB ── reSpeaker XVF3800   (mic + speaker, hardware echo cancellation)
    ├── HDMI ─ 5.5" AMOLED panel   (kiosk face)
    └── USB ── Teensy 4.1  ── micro-ROS `/teensy_node`
                   │

@@ -117,10 +117,9 @@
     }
 
     // ---- Voice session -------------------------------------------------
-    // The client lives in the browser rather than in a Python service on the
-    // Jetson for one reason: the speaker sits beside the microphone, and
-    // WebRTC gives us echo cancellation for free. Without it the robot
-    // transcribes its own voice and talks to itself.
+    // The client lives in the browser, joining with the robot's default
+    // microphone and speaker: both are the XVF3800 array, which does echo
+    // cancellation in hardware.
     jslog('C: before voice session section');
     let room = null;
     const audioSink = document.getElementById('voice-audio');
@@ -150,14 +149,11 @@
 
         room = new LivekitClient.Room({
           adaptiveStream: true,
-          // All OFF, deliberately. PulseAudio's module-echo-cancel already
-          // does echo cancellation, noise suppression and gain control on the
-          // device before the browser ever sees the audio. Running the
-          // browser's WebRTC processing on top means two cancellers in series:
-          // the second one's echo estimate is wrong because the first already
-          // altered the signal, and both degrade. Browser AEC also cannot help
-          // here regardless — it assumes render and capture share a clock, and
-          // ours are separate USB devices.
+          // All OFF, deliberately. The XVF3800 already does echo
+          // cancellation, noise suppression and gain control in hardware
+          // before the browser sees the audio. Browser processing on top would
+          // be a second canceller in series working from an already-altered
+          // signal, and both degrade.
           audioCaptureDefaults: {
             echoCancellation: false,
             noiseSuppression: false,
@@ -187,17 +183,7 @@
           const s = changed['lk.agent.state'];
           if (!s) return;
 
-          // Half-duplex: mute the microphone while the robot is talking.
-          //
-          // Browser echo cancellation cannot help here — the speaker and the
-          // Brio are two SEPARATE USB devices, so there is no shared clock for
-          // AEC to correlate. Without this the mic hears the robot, Scribe
-          // transcribes it, and the model holds a conversation with itself.
-          //
-          // The cost is that you cannot interrupt it mid-sentence. That is a
-          // real loss, and the alternative is it talking over itself forever.
-          // The microphone is never touched mid-call. Echo is handled agent-side
-          // (turn_handling interruption disabled); muting the track here churned
+          // The microphone is never muted mid-call: muting the track churned
           // the audio path and silently killed the call after a few turns.
           if (s === 'speaking')       report('speaking');
           else if (s === 'thinking')  report('thinking');

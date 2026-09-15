@@ -1,114 +1,93 @@
 #!/usr/bin/env bash
-# Put the robot's audio devices back into a known state.
+# Put the robot's audio into a known state.
 #
-# Unplugging the USB hub re-enumerates everything, and that resets ALSA mixer
-# levels and lets PulseAudio pick a new default source. Twice now that has
-# presented as "the robot went deaf": the default source silently moved to the
-# USB speaker's own microphone, so Firefox captured from the wrong device.
+# Microphone AND speaker are one device: the reSpeaker Flex XVF3800 (USB,
+# 16 kHz). The XVF3800 does echo cancellation in hardware, against the exact
+# samples it is playing, on one clock. That replaces the old Brio + USB speaker
+# pair, whose independent clocks made software AEC (PulseAudio
+# module-echo-cancel) drift apart within ~30 s of every call.
 #
 # Everything here resolves devices BY NAME. Card indices move on replug — the
 # same trap as /dev/ttyACM* and PortAudio indices.
 set -u
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 
-MIC_CARD_NAME="${MIC_CARD_NAME:-B500}"        # Brio 500
-SPK_CARD_NAME="${SPK_CARD_NAME:-Device}"      # "USB2.0 Device", the speaker
-SPK_LEVEL="${SPK_LEVEL:-80%}"
+XVF_NAME="${XVF_NAME:-XVF3800}"
+SPK_LEVEL="${SPK_LEVEL:-100%}"
+MIC_SOURCE=gerdoo_mic
 
-card_index() {   # card_index <name-in-/proc/asound/cards>
-    awk -v want="$1" '$2 == "["want"" || $0 ~ "\\["want" *\\]" {print $1; exit}' /proc/asound/cards
-}
-
-MIC_CARD=$(card_index "$MIC_CARD_NAME")
-SPK_CARD=$(card_index "$SPK_CARD_NAME")
-
-if [ -n "${MIC_CARD:-}" ]; then
-    # The Brio's capture gain is what makes ~4 m range possible at all.
-    amixer -c "$MIC_CARD" sset Headset 100% unmute >/dev/null 2>&1
-    echo "mic: card $MIC_CARD ($MIC_CARD_NAME) capture at 100%"
+# ALSA mixer. There are TWO playback controls: PCM,0 (left/right) and PCM,1
+# (a mono master). PCM,1 ships at 67% = -20 dB and quietly caps everything
+# else, so the speaker sounds weak even with PCM,0 and PulseAudio at 100%.
+XVF_CARD=$(awk -v want="$XVF_NAME" 'index($0, want) && $1 ~ /^[0-9]+$/ {print $1; exit}' /proc/asound/cards)
+if [ -n "${XVF_CARD:-}" ]; then
+    amixer -c "$XVF_CARD" sset PCM,0 "$SPK_LEVEL" unmute >/dev/null 2>&1
+    amixer -c "$XVF_CARD" sset PCM,1 "$SPK_LEVEL" unmute >/dev/null 2>&1
+    amixer -c "$XVF_CARD" sset Headset 100% unmute >/dev/null 2>&1
+    echo "xvf3800: card $XVF_CARD, speaker at $SPK_LEVEL"
 else
-    echo "mic: card '$MIC_CARD_NAME' NOT FOUND" >&2
+    echo "xvf3800: card matching '$XVF_NAME' NOT FOUND" >&2
 fi
 
-if [ -n "${SPK_CARD:-}" ]; then
-    # The hardware mixer ships at 15%, which reads as a broken speaker.
-    amixer -c "$SPK_CARD" sset PCM "$SPK_LEVEL" unmute >/dev/null 2>&1
-    echo "speaker: card $SPK_CARD ($SPK_CARD_NAME) PCM at $SPK_LEVEL"
-else
-    echo "speaker: card '$SPK_CARD_NAME' NOT FOUND" >&2
-fi
+# PulseAudio can take a moment to publish a freshly plugged card.
+for _ in 1 2 3 4 5; do
+    MASTER=$(pactl list short sources 2>/dev/null | awk -v want="$XVF_NAME" 'index($2, want) && !/monitor/ {print $2; exit}')
+    [ -n "${MASTER:-}" ] && break
+    sleep 1
+done
+SINK=$(pactl list short sinks 2>/dev/null | awk -v want="$XVF_NAME" 'index($2, want) && !/monitor/ {print $2; exit}')
 
-# The call uses the BRIO for capture and the USB speaker for playback.
-#
-# They are separate USB devices with independent clocks, which is exactly what
-# software echo cancellation struggles with — hence adjust_time=1 below. Using
-# the speaker's own microphone would put capture and playback in one clock
-# domain and make AEC trivial, but that microphone is poor and was rejected.
-SRC=$(pactl list short sources 2>/dev/null | awk '/Brio/ && !/monitor/ {print $2; exit}')
-SINK=$(pactl list short sinks 2>/dev/null | awk '/USB2.0/ && !/monitor/ {print $2; exit}')
-[ -n "${SRC:-}" ] && pactl set-source-volume "$SRC" 100% >/dev/null 2>&1
-
-# The speaker's mic ships at 33%.
-[ -n "${SPK_CARD:-}" ] && amixer -c "$SPK_CARD" sset Mic 100% unmute >/dev/null 2>&1 \
-    && echo "speaker mic: capture at 100%"
-
-# Echo cancellation, in PulseAudio rather than the browser.
-#
-# The speaker and the microphone are two SEPARATE USB devices, so the browser's
-# AEC has no shared clock to correlate and cannot cancel anything — the robot
-# hears itself and interrupts itself. module-echo-cancel sees both the sink and
-# the source, so it can. Barge-in depends on this being loaded.
-if ! pactl list short modules 2>/dev/null | grep -q echo-cancel; then
-    if [ -n "${SRC:-}" ] && [ -n "${SINK:-}" ]; then
-        # adjust_time=1 / adjust_threshold=1 matter as much as the canceller
-        # itself. The Brio and the speaker are separate USB devices with
-        # INDEPENDENT clocks, and AEC only works while playback and capture stay
-        # aligned. At the default 10s resync interval the two drift apart and
-        # cancellation collapses after roughly thirty seconds — the robot starts
-        # transcribing its own voice again. Resyncing every second tracks it.
-        pactl load-module module-echo-cancel \
-            source_master="$SRC" sink_master="$SINK" \
-            source_name=gerdoo_aec_source sink_name=gerdoo_aec_sink \
-            aec_method=webrtc adjust_time=1 adjust_threshold=1 \
-            aec_args=extended_filter=1 \
+# The 6-channel firmware delivers:
+#   ch0  processed: AEC + beamforming + noise suppression + AGC  <- we use this
+#   ch1  ASR beam (auto-selected), same processing chain, lower gain
+#   ch2-5  the four raw microphones, NOT echo-cancelled
+# Any application that opens the 6-channel source and downmixes it (Firefox
+# does) blends the raw mics back in and undoes the echo cancellation. So expose
+# channel 0 alone as a mono source and make that the only thing apps see.
+if ! pactl list short sources 2>/dev/null | grep -q "$MIC_SOURCE"; then
+    if [ -n "${MASTER:-}" ]; then
+        pactl load-module module-remap-source master="$MASTER" \
+            source_name="$MIC_SOURCE" \
+            source_properties=device.description=Gerdoo_mic_XVF3800 \
+            channels=1 master_channel_map=front-left channel_map=mono remix=no \
             >/dev/null 2>&1 \
-            && echo "echo cancellation: loaded" \
-            || echo "echo cancellation: FAILED to load" >&2
-        sleep 1
+            && echo "mic: $MIC_SOURCE = XVF3800 channel 0 (processed)" \
+            || echo "mic: FAILED to create $MIC_SOURCE" >&2
     fi
 else
-    echo "echo cancellation: already loaded"
+    echo "mic: $MIC_SOURCE already present"
 fi
 
+# The software canceller from the Brio era must not come back: stacked on the
+# XVF3800 it would fight the hardware AEC.
+pactl list short modules 2>/dev/null | awk '/module-echo-cancel/ {print $1}' | while read -r m; do
+    pactl unload-module "$m" >/dev/null 2>&1 && echo "echo-cancel: unloaded (hardware AEC now)"
+done
+
 # module-stream-restore remembers which device each application used last and
-# silently OVERRIDES the defaults for it. Firefox therefore stayed pinned to the
-# raw microphone and raw sink, so the echo canceller was never in its path and
-# the robot transcribed its own speech back as user input, verbatim. Unload it
-# so applications follow the defaults set below.
+# silently OVERRIDES the defaults for it — Firefox stayed pinned to a raw
+# device and the robot transcribed its own speech back. Unload it so
+# applications follow the defaults set below.
 if pactl list short modules 2>/dev/null | grep -q module-stream-restore; then
     pactl unload-module module-stream-restore >/dev/null 2>&1 \
         && echo "stream-restore: unloaded (apps now follow the defaults)"
 fi
 
-# Everything must go through the cancelled devices, both directions — the
-# canceller can only subtract what it knows was played.
-if pactl list short sources 2>/dev/null | grep -q gerdoo_aec_source; then
-    pactl set-default-source gerdoo_aec_source && echo "default source: gerdoo_aec_source (AEC)"
-    pactl set-default-sink   gerdoo_aec_sink   && echo "default sink:   gerdoo_aec_sink (AEC)"
+if pactl list short sources 2>/dev/null | grep -q "$MIC_SOURCE" && [ -n "${SINK:-}" ]; then
+    pactl set-default-source "$MIC_SOURCE" && echo "default source: $MIC_SOURCE"
+    pactl set-default-sink "$SINK" && echo "default sink:   $SINK"
+    pactl set-sink-volume "$SINK" 100% >/dev/null 2>&1
 
-    # Anything already streaming keeps its old device until moved, so drag any
-    # live streams across too. Matters when this runs while a call is up.
-    # cut, not awk: awk's $1 gets eaten by the shell here.
+    # Anything already streaming keeps its old device until moved. Matters when
+    # this runs while a call is up. cut, not awk: awk's $1 gets eaten here.
     pactl list short source-outputs 2>/dev/null | cut -f1 | while read -r so; do
-        [ -n "$so" ] && pactl move-source-output "$so" gerdoo_aec_source >/dev/null 2>&1
+        [ -n "$so" ] && pactl move-source-output "$so" "$MIC_SOURCE" >/dev/null 2>&1
     done
     pactl list short sink-inputs 2>/dev/null | cut -f1 | while read -r si; do
-        [ -n "$si" ] && pactl move-sink-input "$si" gerdoo_aec_sink >/dev/null 2>&1
+        [ -n "$si" ] && pactl move-sink-input "$si" "$SINK" >/dev/null 2>&1
     done
 else
-    echo "AEC devices missing — falling back to the raw devices" >&2
-    [ -n "${SRC:-}" ] && pactl set-default-source "$SRC" && echo "default source: $SRC"
-    [ -n "${SINK:-}" ] && pactl set-default-sink "$SINK" && echo "default sink: $SINK"
+    echo "XVF3800 not ready — defaults left unchanged" >&2
 fi
 
 exit 0

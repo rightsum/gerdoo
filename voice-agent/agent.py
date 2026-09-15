@@ -10,7 +10,6 @@ cross-machine RPC is needed to start a conversation.
 import asyncio
 import logging
 import os
-import difflib
 import json
 import re
 import time
@@ -245,29 +244,12 @@ async def entrypoint(ctx: JobContext):
             model=os.environ.get("ELEVEN_TTS_MODEL", "eleven_multilingual_v2"),
         ),
         vad=silero.VAD.load(),
-        # Barge-in is ON. You can talk over her and she stops.
+        # Barge-in is ON, with LiveKit's default thresholds. You can talk over
+        # her and she stops.
         #
-        # This only works because echo cancellation now happens in PulseAudio on
-        # the Jetson (module-echo-cancel), which — unlike the browser's AEC —
-        # sees both the speaker sink and the mic source, so it can cancel across
-        # two separate USB devices. Without that, interruptions make the robot
-        # interrupt ITSELF the moment it hears its own voice.
-        #
-        # The thresholds are deliberately above the defaults (0.5s / 0 words):
-        # residual echo tends to be short and fragmentary, so requiring a real
-        # utterance keeps the leftovers from counting as an interruption.
-        # Interruptions OFF. This is a deliberate trade, not an oversight.
-        #
-        # Echo cancellation has to hold two SEPARATE USB devices in sync — the
-        # Brio captures, the speaker plays — and their clocks drift apart. AEC
-        # is good enough that the robot does not hear itself while it is the
-        # only one talking, but not good enough to distinguish its own voice
-        # from a genuine interruption. With barge-in enabled it interrupts
-        # ITSELF on its own echo, which is far worse than not being
-        # interruptible.
-        #
-        # Barge-in becomes safe the moment capture and playback share a clock:
-        # one USB speakerphone with hardware AEC. Until then, half-duplex.
+        # Echo is handled entirely by the robot's XVF3800 microphone array,
+        # which cancels the speaker in hardware on the same clock it plays on.
+        # Nothing in this agent tries to recognise or filter her own voice.
         turn_handling={
             "interruption": {
                 "enabled": True,
@@ -276,45 +258,12 @@ async def entrypoint(ctx: JobContext):
                 # so it 401s, retries, and falls back to VAD anyway — after
                 # burning a couple of seconds on every session.
                 "mode": "vad",
-                # Low, because the echo filter above now catches her own
-                # voice by content. What matters here is that a real
-                # interruption is not missed.
-                "min_duration": 0.6,
-                "min_words": 2,
             }
         },
-        # If she is interrupted but no real user turn follows, that was almost
-        # certainly her own echo — pick up where she left off instead of
-        # abandoning the answer.
-        resume_false_interruption=True,
-        agent_false_interruption_timeout=2.0,
     )
 
     timer = SilenceTimer(timeout_s=SILENCE_TIMEOUT_S, now=time.monotonic())
 
-    # What she has recently said, so her own echo can be recognised and thrown
-    # away. Echo cancellation across two USB clocks is imperfect, and what
-    # leaks through is a garbled copy of her own sentence — which STT
-    # transcribes and the model then answers, holding a conversation with
-    # itself. Comparing against her own recent speech catches it regardless of
-    # how good the cancellation is.
-    recent_agent_speech: list[str] = []
-
-    def is_own_echo(text: str) -> bool:
-        norm = " ".join(text.split())
-        if len(norm) < 12:
-            return False        # too short to judge; let it through
-        for said in recent_agent_speech[-3:]:
-            if difflib.SequenceMatcher(None, norm, said).ratio() > 0.45:
-                return True
-            # Echo is often a fragment of a longer sentence, which ratio()
-            # scores poorly, so check containment of a distinctive run too.
-            words = norm.split()
-            if len(words) >= 4:
-                for i in range(len(words) - 3):
-                    if " ".join(words[i:i + 4]) in said:
-                        return True
-        return False
     # The entrypoint returning is what ends a job. With nothing to wait on, the
     # agent greets, this coroutine falls off the end, and the session dies —
     # which presents exactly as "it will not hold a conversation".
@@ -334,10 +283,6 @@ async def entrypoint(ctx: JobContext):
         stripped = re.sub(r"\[[^\]]*\]", "", text).strip()
         if not stripped:
             _trace(f"IGNORED non-speech: {text!r}")
-            return
-
-        if is_own_echo(stripped):
-            _trace(f"IGNORED own echo: {stripped[:80]!r}")
             return
 
         timer.mark_user_spoke(now=time.monotonic())
@@ -425,9 +370,6 @@ async def entrypoint(ctx: JobContext):
         item = getattr(ev, "item", None)
         role = getattr(item, "role", "?")
         txt = getattr(item, "text_content", None) or ""
-        if role == "assistant" and txt:
-            recent_agent_speech.append(" ".join(str(txt).split()))
-            del recent_agent_speech[:-3]
         _trace(f"ITEM [{role}]: {str(txt)[:160]!r}")
     watch = asyncio.create_task(_watch_silence())
     _background.add(watch)

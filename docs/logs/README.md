@@ -31,6 +31,7 @@ NNN-YYYY-MM-DD-short-title.md
 | [015](015-2026-09-02-voice-switch-echo-and-language.md) | 2026-09-02 | Voice on/off switch, wake-word false positives, echo filtering that made barge-in usable, selectable recognition language | ✅ Working |
 | [016](016-2026-09-02-agent-tools-search-and-time.md) | 2026-09-02 | Agent tools — web search and a clock with the Persian calendar, so it can answer about the outside world | ✅ Working |
 | [017](017-2026-09-03-face-tracking.md) | 2026-09-03 | The neck follows your face during a call, replacing gesture detection — and three definitions of "centre" that disagreed | ✅ Working |
+| [018](018-2026-09-15-xvf3800-hardware-aec.md) | 2026-09-15 | reSpeaker XVF3800 becomes the robot's mic and speaker — hardware echo cancellation, every software echo workaround removed, a hidden -20 dB volume control | ✅ Deployed · 🔄 Barge-in and wake-word range to re-test |
 
 Entries are either **problems** (001, 003) or **design decision records** (002). Both belong here — a decision you cannot reconstruct the reasoning for is as expensive as a bug you cannot reproduce.
 

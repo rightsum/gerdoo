@@ -265,6 +265,8 @@ Also: MJPEG-only means the Jetson CPU-decodes every frame, and JPEG artifacts si
   - Color: Graphite
   - Compatible: Microsoft Teams, Google Meet, Zoom, USB-C plug-and-play
   - Use case: High-quality webcam for robot teleoperation / video streaming
+- **In service:** camera for the control panel stream and face tracking. **Its microphone
+  is no longer used** — the XVF3800 replaced it on 2026-09-15 (see Audio).
 
 ---
 
@@ -804,6 +806,7 @@ Design rule: **the power rails carry power only — never a signal that touches 
 | **Charger** | **XL4015 #1** | 19V input → 12.6V CC/CV to pack | ⚠️ requires the CC/CV variant — **open item 1** |
 | **5V servo rail** | **LM2596S** from 12.6V | SG90 neck pan/tilt servos | ✅ Live. 3A. Adjustable — see the 6V note below |
 | **5V lighting rail** | **MINI560** from 12.6V | COB LED strip via D4184 MOSFET | ✅ Live, added 2026-08-26. Dedicated, see below |
+| **12V direct** | battery | reSpeaker XVF3800 2-pin 12 V terminal (feeds its 10 W amp) | ✅ Live, added 2026-09-15. USB-C carries data only. Unfused — see Fusing |
 
 #### ✅ Resolved 2026-08-26: two separate 5V rails
 
@@ -1320,27 +1323,59 @@ Divider polarity varies by batch. Firmware has an `LDR_BRIGHT_IS_HIGH` constant 
 
 ## 🔊 Audio
 
-### NBFINE USB PC Speaker (mini soundbar, clip-on)
+### reSpeaker Flex XVF3800 Circular-4 with XIAO ESP32S3 — ✅ in service (mic + speaker)
+- **Store:** Seeed Studio
+- **Link:** https://www.seeedstudio.com/reSpeaker-Flex-XVF3800-Circular-4-with-XIAO-ESP32S3-p-6739.html
+- **Qty:** 1 · **Status:** In service 2026-09-15
+- **Specs:**
+  - Processor: XMOS XVF3800 — hardware AEC, beamforming, noise suppression, AGC
+  - Mics: 4, circular array · max sample rate 16 kHz
+  - Speaker amp: TI TPA3139D2, **10 W into 4 Ω** via JST · 3.5 mm AUX out
+  - Power: **5 V** on USB-C or 5 V JST, **12 V** on the 2-pin terminal
+  - USB: UAC 2.0, 2- and 6-channel USB firmware variants; also an I2S mode for the XIAO
+- **Wiring:** 12 V from the battery on the 2-pin terminal · USB-C to the Jetson (data)
+- **On the Jetson:** USB `2886:001e`, ALSA card name **`C16K6Ch`** — it arrived already
+  on the **6-channel USB firmware**, no flashing needed. Playback 2 ch, capture 6 ch,
+  both **16 kHz S16_LE only**.
+
+It is the robot's only microphone and only speaker. Echo cancellation happens **in
+the hardware**, against the exact samples it plays, on one clock. There is no software
+echo handling anywhere in the stack any more — see log 018.
+
+**Capture channels (6-channel firmware):**
+
+| Ch | Signal | Used by |
+|---|---|---|
+| 0 | Processed: AEC + beamforming + noise suppression + AGC | **everything**, as `gerdoo_mic` |
+| 1 | ASR beam (auto-selected), same chain, about half the level of ch0 | — |
+| 2–5 | The four raw microphones, **not** echo-cancelled | — |
+
+⚠️ **Never let an application open the 6-channel source directly.** Firefox downmixes
+it, blending the raw mics back in and undoing the echo cancellation. `audio-setup.sh`
+exposes channel 0 alone as the mono PulseAudio source `gerdoo_mic` and makes it the
+default.
+
+⚠️ **There are two playback volume controls, and the second one hides.** `PCM,0`
+(left/right) and `PCM,1` (a mono master). `PCM,1` ships at 67% = **-20 dB** and caps
+everything else — the speaker sounds weak with `PCM,0` and PulseAudio both at 100%.
+Both are set to 100% on every wake-word start.
+
+Deeper tuning (AEC, output gain, mic gain, channel routing) is `xvf_host` from
+[respeaker/reSpeaker_XVF3800_USB_4MIC_ARRAY](https://github.com/respeaker/reSpeaker_XVF3800_USB_4MIC_ARRAY)
+(`host_control/jetson/`). It needs root, or a udev rule for `2886:001e` — not set up yet.
+
+### NBFINE USB PC Speaker (mini soundbar, clip-on) — retired 2026-09-15
 - **Store:** Amazon.de (NBFINE)
 - **Link:** https://www.amazon.de/dp/B0CPJ1WHCK
-- **Qty:** 1 · **Status:** Completed
+- **Qty:** 1 · **Status:** Completed · **Retired** — replaced by the XVF3800
 - **Specs:**
   - Type: Mini soundbar / portable desktop speaker
-  - Mounting: Clip-on design (attaches to monitor)
-  - Connection: USB (plug and play, no drivers)
-  - Includes: USB-A to USB-C adapter
-  - Power: USB-powered
-  - Use case: Audio output for the robot (alerts, TTS, sound feedback)
-- **In service 2026-08-29.** ALSA **card 3**, `USB2.0 Device` at `usb-3610000.usb-2.1.3`.
-  Stereo out 48 kHz S16_LE, **plus a mono capture endpoint** — it has a mic of its own.
-  Set as the PulseAudio default sink.
+  - Connection: USB (plug and play, no drivers) · Power: USB
+- **Was in service 2026-08-29 → 2026-09-15** as ALSA `USB2.0 Device`, stereo out 48 kHz.
+  Its capture endpoint is not a real microphone.
 
-⚠️ **The ALSA hardware mixer ships at 15%** (`PCM` = 39/255), which reads as a broken or
-faint speaker. PulseAudio's level rides on top of it, so `amixer -c 3 sset PCM <n>%` is
-the control that matters — not `pactl set-sink-volume`.
-
-> The sink defaults to the **iec958** (S/PDIF) profile. If PulseAudio playback is silent
-> while direct ALSA works, switch the card to `analog-stereo`.
+> Why it went: playing through a separate USB device from the microphone meant two
+> clocks, and software echo cancellation across two clocks never became reliable.
 
 ### 🎙️ Wake word — "Gerdoo, baba" (گردو بابا)
 
@@ -1349,46 +1384,41 @@ Offline Persian wake-word trigger. Full write-up in the wake-word code.
 | | |
 |---|---|
 | **Engine** | Vosk, `vosk-model-small-fa-0.42` (97 MB, `~/models/`), CPU, fully offline |
-| **Mic** | **Brio 500** — chosen over the speaker's own mic so the robot cannot hear itself |
+| **Mic** | **XVF3800 channel 0** via PulseAudio (`--device-name pulse` → `gerdoo_mic`). Was the Brio 500 until 2026-09-15 |
 | **Method** | Decoder grammar with filler competitors, final results only, both words required |
-| **Gain** | **3.0×** in software — measured by replay, not guessed |
+| **Gain** | **1.0×** — channel 0 has the XVF3800's own AGC. The Brio needed 3.0×. ⚠️ Range not yet re-measured on the new mic |
 | **Service** | `wake-word.service`, systemd `--user`, enabled at boot |
 | **Measured** | 18/18 detections on the bench. ⚠️ **False positives in real use** — see the correction in log 013 |
 | **Range** | ~4 m. Beyond that needs a better mic, not more tuning |
 
-⚠️ **The Brio's capture gain does not survive a reboot**, and the 4 m range depends on it
-being at the top of its range (54 dB / 72). The unit re-applies it in `ExecStartPre`.
+⚠️ **Mixer levels do not survive a replug or reboot.** The unit re-applies them in
+`ExecStartPre` via `audio-setup.sh`.
 
 ⚠️ **PortAudio device indices move between reboots and replugs** — the same trap as
-`/dev/ttyACM*`. Select the mic by name (`--device-name Brio`), never by index.
+`/dev/ttyACM*`. Select the mic by name (`--device-name pulse`), never by index.
 
 ⚠️ **`paplay` accepts an mp3 path and silently plays nothing.** That is indistinguishable
 from the detector not firing. Use `mpg123` for compressed audio.
 
 ### 🔊 Audio routing — read before touching anything that captures or plays
 
-The Brio (capture) and the USB speaker (playback) are **two separate USB devices with
-independent clocks**, and that single fact drives everything below.
+One device does both directions: the **XVF3800**, with echo cancellation in hardware.
+The Brio 500 is now **camera only**.
 
-`wake-word/audio-setup.sh` puts it all back into a known state and runs on every
-wake-word service start. Run it by hand whenever audio misbehaves — it prints what it
-found.
+`wake-word/audio-setup.sh` puts it all into a known state and runs on every wake-word
+service start. Run it by hand whenever audio misbehaves — it prints what it found.
 
-| Trap | What it looks like |
+| Rule | Why |
 |---|---|
-| **Two processes, one microphone.** `wake_word.py` opens the Brio through raw ALSA and holds `/dev/snd/pcmC2D0c` | Firefox's `getUserMedia` succeeds and captures **silence**. Everything looks connected. The detector now releases the device during a call |
-| **`module-stream-restore` overrides the default device per application** | Setting the default source/sink does not move Firefox. It stays on whatever it used last, so the echo canceller is bypassed. It is unloaded |
-| **Clock drift between the two devices** | Echo cancellation works for ~30 s then collapses and the robot transcribes its own voice. Fixed with `adjust_time=1 adjust_threshold=1` — resync every second instead of every ten. `adjust_threshold` must be an **integer** or the module fails to load |
-| **Replugging the USB hub** | Mixer levels reset (speaker to 15%) and the default source moves to the **speaker's own mic**. The robot goes deaf while looking fine |
-| **Card indices move on replug** | Resolve by name (`B500`, `Device`), never `-c 2`. Third time this project has been bitten by addressing USB hardware by number |
+| **Everything captures from `gerdoo_mic`** (XVF3800 ch0, mono) | The raw 6-channel source mixes un-cancelled mics back in |
+| **Everything plays to the XVF3800 sink** | The hardware can only cancel what it plays itself. Audio sent to any other output reaches the mic un-cancelled |
+| **No software echo cancellation, anywhere** | No `module-echo-cancel`, browser `echoCancellation`/`noiseSuppression`/`autoGainControl` all off. A second canceller in series works from an already-altered signal and degrades both. `audio-setup.sh` unloads `module-echo-cancel` if it reappears |
+| **`module-stream-restore` stays unloaded** | It pins each application to the device it used last and overrides the defaults — Firefox would stay on a stale device |
+| **Resolve devices by name** (`XVF3800`), never card index | Indices move on replug. This project has been bitten by addressing USB hardware by number three times |
 
-⚠️ **Echo cancellation is `module-echo-cancel` in PulseAudio, not the browser.** Browser
-AEC cannot work across two devices with no shared clock. Both directions must route
-through `gerdoo_aec_source` / `gerdoo_aec_sink` — the canceller can only subtract what it
-knows was played.
-
-⚠️ **The speaker has its own microphone.** It is in the same clock domain as the speaker,
-so AEC would be trivial — but it is a poor microphone and was rejected. The Brio stays.
+> History: the Brio + USB speaker pair, and the PulseAudio echo canceller with clock-drift
+> correction and the agent-side echo filter that it needed, are in logs 014–015. All of it
+> was removed in log 018.
 
 ---
 

@@ -80,10 +80,9 @@ GRAMMAR_FILLER = json.dumps([WAKE_PHRASE] + FILLER_WORDS + ["[unk]"],
                             ensure_ascii=False)
 
 SAMPLE_RATE = 16000     # what the Vosk models expect
-# The USB speaker's mic is 48 kHz-only and PortAudio refuses to open it at
-# 16 kHz, so capture native and decimate. 48000/16000 = 3 exactly, a clean
-# integer decimation. The Brio does both; 48 k keeps one code path.
-CAPTURE_RATE = 48000
+# The XVF3800 is natively 16 kHz. --capture-rate still accepts any integer
+# multiple, decimated down, for other microphones.
+CAPTURE_RATE = 16000
 BLOCK_SECONDS = 0.25
 
 
@@ -157,10 +156,6 @@ SESSION_MAX_S = 3600.0
 # join and nobody is talking to anyone. Give up on those quickly, so the robot
 # is not left deaf to its own name.
 CONNECTING_MAX_S = 45.0
-
-# Silence after the chime before the session starts, so the tail of the sound
-# does not reach the microphone as the browser joins.
-CHIME_SETTLE_S = 0.4
 
 # A session is only considered over after this many consecutive idle reads.
 # One reading is not enough: a transient failure or a race against the browser's
@@ -306,7 +301,7 @@ def main():
     ap.add_argument("--device", type=int, default=None,
                     help="input device index (see --list-devices)")
     ap.add_argument("--device-name", default=None,
-                    help="select the input by name substring, e.g. 'Brio'. Preferred "
+                    help="select the input by name substring, e.g. 'pulse'. Preferred "
                          "over --device: PortAudio indices move between reboots and "
                          "replugs, exactly like /dev/ttyACM* does")
     ap.add_argument("--capture-rate", type=int, default=CAPTURE_RATE,
@@ -322,8 +317,8 @@ def main():
     ap.add_argument("--replay", default=None,
                     help="run a recorded wav through the detector instead of the mic")
     ap.add_argument("--gain", type=float, default=1.0,
-                    help="linear gain applied before the model. The Brio's hardware "
-                         "gain is nearly maxed, so this is the remaining lever for range")
+                    help="linear gain applied before the model. Leave at 1.0 for a mic "
+                         "with its own AGC; raise it for range on one without")
     ap.add_argument("--sweep", action="store_true",
                     help="with --replay: report hit counts across a range of thresholds")
     ap.add_argument("--sweep-gain", action="store_true",
@@ -443,11 +438,9 @@ def main():
         return st
 
     def close_mic(st):
-        # The Brio is a single hardware capture device and this process holds it
-        # through raw ALSA. While it is open, Firefox's getUserMedia succeeds but
-        # receives SILENCE — the voice agent then sees the user as "away" and
-        # never answers. Releasing it for the duration of a call is the only way
-        # both can use the microphone.
+        # Released during a call and when voice is switched off. Through
+        # PulseAudio the browser could share it, but the detector has nothing to
+        # do mid-call, and "off" should mean the microphone is closed.
         try:
             st.stop()
             st.close()
@@ -461,8 +454,7 @@ def main():
             while True:
                 # Master switch. "Off" has to mean the microphone is actually
                 # RELEASED, not merely that triggers are ignored — otherwise the
-                # Brio's LED stays lit and the robot is still listening, which is
-                # not what anyone means by off.
+                # robot is still listening, which is not what anyone means by off.
                 if args.voice_url and time.time() - last_switch_check >= SWITCH_POLL_S:
                     last_switch_check = time.time()
                     off = voice_disabled(args.voice_url)
@@ -530,13 +522,9 @@ def main():
                     last_fire = time.time()
                     continue
 
-                # Wait for the chime to FINISH before handing over to LiveKit.
-                # The browser joins with its microphone already live, so a chime
-                # still playing out of the speaker becomes the first thing the
-                # agent transcribes — it hears itself say "janam" and answers it.
-                play(args.sound, wait=bool(args.voice_url))
-                if args.voice_url:
-                    time.sleep(CHIME_SETTLE_S)   # let the speaker tail decay
+                # No waiting for the chime to finish: it plays through the
+                # XVF3800, whose hardware AEC removes it from the microphone.
+                play(args.sound)
                 rec.Reset()
 
                 if args.voice_url:
