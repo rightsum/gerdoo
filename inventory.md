@@ -1362,7 +1362,29 @@ Both are set to 100% on every wake-word start.
 
 Deeper tuning (AEC, output gain, mic gain, channel routing) is `xvf_host` from
 [respeaker/reSpeaker_XVF3800_USB_4MIC_ARRAY](https://github.com/respeaker/reSpeaker_XVF3800_USB_4MIC_ARRAY)
-(`host_control/jetson/`). It needs root, or a udev rule for `2886:001e` — not set up yet.
+(`host_control/jetson/`). ⚠️ **The bundled compiled tool cannot see this board** —
+its USB ids are built in for the other XVF3800 (the USB 4-Mic Array), so it reports
+"No device found". Use the repo's **Python** tool instead, which takes the id:
+
+```bash
+pip3 install --user pyusb libusb_package          # once
+cd ~/reSpeaker_XVF3800_USB_4MIC_ARRAY/python_control
+python3 xvf_host.py --pid 0x001e -l               # every parameter, with descriptions
+python3 xvf_host.py --pid 0x001e AEC_SPENERGY_VALUES
+python3 xvf_host.py --pid 0x001e PP_AGCGAIN --values 8    # writes take --values
+```
+
+Access without root comes from `wake-word/99-respeaker-xvf3800.rules`
+(`sudo cp` it into `/etc/udev/rules.d/`, then `udevadm control --reload-rules &&
+udevadm trigger`). It is scoped to `2886:001e` and grants the seat user and the
+`plugdev` group, nothing wider. `udevadm trigger` is asynchronous — check the device
+node a moment later, not immediately.
+
+Parameters worth knowing: `AEC_SPENERGY_VALUES` (per-beam speech energy — zero on
+every beam means the board hears no speech), `PP_AGCGAIN` and `PP_AGCMAXGAIN`
+(current and maximum gain), `AEC_FIXEDBEAMSGATING` (silences inactive beams when
+enabled; it is **off** here), and `AEC_ASROUTONOFF` (1 = beamformer output, 0 = AEC
+residuals, one channel per microphone).
 
 ### NBFINE USB PC Speaker (mini soundbar, clip-on) — retired 2026-09-15
 - **Store:** Amazon.de (NBFINE)
@@ -1449,9 +1471,34 @@ package manager will ever flag it.
 the robot's only playback device is capture/playback-locked to 16 kHz
 S16_LE). Speech is fine; music through it will sound like a phone call.
 
-Full design, the behaviour around voice calls, and a deployment trap in the
-wake-word service are in
-[`docs/logs/019-2026-09-18-video-playback.md`](docs/logs/019-2026-09-18-video-playback.md).
+⚠️ **The search needs `-I 1`.** Without it `yt-dlp` prints a usable result within
+seconds and then keeps working for minutes; since the caller waits for the process
+to EXIT, a search that had already answered still timed out and the robot said it
+could not find anything. Measured on the robot: 3-4s with the flag, 4s once and
+twice past two minutes without. `--flat-playlist` is faster still but returns the
+artist's **channel** rather than a video for a singer's name.
+
+⚠️ **`--fullscreen` in the unit does not stick.** The window is created lazily when
+a file loads, so the flag applies to a window that does not exist yet and the kiosk
+face shows through at the top. `mpv-seek.lua` sets `fullscreen` on each
+`file-loaded` instead, which is what actually covers the face.
+
+**Touch:** `robot-face/deploy/mpv-seek.lua` — double-tap one side of the screen to
+skip forward ten seconds, the other side back. It lives inside mpv because mpv owns
+the screen while playing, so a handler in the kiosk page never receives the touch.
+The panel is mounted rotated and a touchscreen is not necessarily rotated in step
+with the display, so the script prints each tap's coordinates on screen until the
+axis is confirmed — ⏳ **not yet calibrated**.
+
+**Before every call** `/api/voice/wake` checks that `gerdoo_mic` exists and re-runs
+`audio-setup.sh` if it does not. That source disappeared silently in service once;
+with it gone the browser falls back to the raw six-channel input and the robot
+transcribes its own voice, while every service still reports healthy.
+
+Full design and the behaviour around voice calls are in
+[`docs/logs/019-2026-09-18-video-playback.md`](docs/logs/019-2026-09-18-video-playback.md);
+the deployment, the decisions and six wrong theories about a deaf microphone are in
+[`docs/logs/020-2026-09-18-video-playback-deployed.md`](docs/logs/020-2026-09-18-video-playback-deployed.md).
 
 ---
 

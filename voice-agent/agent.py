@@ -175,7 +175,13 @@ SYSTEM_PROMPT = (
     "with stop_video. When you play something, the conversation ends immediately "
     "so the video can have the screen — say one short sentence about what you are "
     "playing and nothing more. If the user asks for something you cannot find, "
-    "say so instead of playing something else.\n\n"
+    "say so instead of playing something else.\n"
+    "- NEVER say you are playing, putting on, or about to play something unless "
+    "you have actually called play_video and it succeeded. Saying it is not doing "
+    "it. If you did not call the tool, nothing is playing, and claiming otherwise "
+    "leaves the person staring at a screen that never changes.\n"
+    "- If the tool returns an error, say plainly that it did not work. Do not "
+    "pretend it did.\n\n"
     "TIME AND DATE:\n"
     "- You have a clock tool. Use it for the time, the date, the day of the "
     "week, or anything that depends on today — never guess.\n"
@@ -323,7 +329,25 @@ async def entrypoint(ctx: JobContext):
                 # so it 401s, retries, and falls back to VAD anyway — after
                 # burning a couple of seconds on every session.
                 "mode": "vad",
-            }
+            },
+            # OFF. It is ON by default — and passing this dict at all does not
+            # opt out, because the library fills every key we omit from its own
+            # defaults.
+            #
+            # Preemptive generation starts answering from a PARTIAL transcript,
+            # before the turn ends. Asked in Persian to play a song on YouTube,
+            # she said she would and never called the tool: one second from
+            # thinking to speaking, no tool call in the trace. The same model,
+            # given the same request with the real prompt and all four tools,
+            # called play_video 5 times out of 5 — so the model is not the
+            # problem. The agent log shows preemptive generations being thrown
+            # away "because the transcript, chat context, tools, or tool choice
+            # changed"; the ones that are NOT thrown away are answers composed
+            # before the request was complete.
+            #
+            # A speculative reply is a bad trade for a robot that acts on what it
+            # hears: a fraction of a second saved against doing the wrong thing.
+            "preemptive_generation": {"enabled": False},
         },
     )
 

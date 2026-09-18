@@ -238,6 +238,9 @@ def test_resolve_searches_for_bare_words(monkeypatch):
     assert url == "https://www.youtube.com/watch?v=abc123"
     assert title == "Googoosh - Talagh"
     assert "ytsearch1:googoosh talagh" in calls[0]
+    # Only the first result is processed. Without this yt-dlp answers quickly and
+    # then keeps running, and the wait for exit times out anyway.
+    assert calls[0][calls[0].index("-I") + 1] == "1"
 
 
 def test_resolve_keeps_a_url_and_fetches_its_title(monkeypatch):

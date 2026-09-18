@@ -15,6 +15,7 @@ import json
 import os
 import time
 import queue
+import subprocess
 import threading
 
 from flask import (
@@ -399,6 +400,38 @@ def api_voice_enabled():
     return jsonify({"enabled": voice_enabled()})
 
 
+AUDIO_SETUP = os.path.expanduser("~/wake-word/audio-setup.sh")
+MIC_SOURCE = "gerdoo_mic"
+
+
+def _ensure_mic():
+    """
+    Make sure the echo-cancelled microphone exists before a call starts.
+
+    `gerdoo_mic` carries only the XVF3800's processed channel. PulseAudio drops a
+    remapped source when its master disappears for a moment — a USB blip is
+    enough — and nothing puts it back, because audio-setup.sh runs only when the
+    wake-word service starts. With it gone the browser falls back to the raw
+    six-channel input, which mixes the UN-cancelled microphones back in, and the
+    robot transcribes its own voice.
+
+    That happened in service, and the worst part is how quiet the failure is:
+    every service reports healthy and the only symptom is the robot talking to
+    itself. A call is the one moment this must be right, so it is checked here.
+    Failure to check is never allowed to block the call.
+    """
+    try:
+        listed = subprocess.run(["pactl", "list", "short", "sources"],
+                                capture_output=True, text=True, timeout=5)
+        if MIC_SOURCE in listed.stdout:
+            return
+        app.logger.warning("%s missing before a call — re-running audio setup",
+                           MIC_SOURCE)
+        subprocess.run([AUDIO_SETUP], capture_output=True, text=True, timeout=30)
+    except Exception as e:
+        app.logger.warning("microphone check failed (%s)", e)
+
+
 @app.route("/api/voice/wake", methods=["POST"])
 def api_voice_wake():
     """Called by the wake-word service. Mints a token and tells the face to join."""
@@ -406,6 +439,7 @@ def api_voice_wake():
         return jsonify(error="forbidden"), 403
     if not voice_enabled():
         return jsonify({"error": "voice disabled"}), 409
+    _ensure_mic()
     url, key, secret = _voice_cfg()
     token = voice.mint_token(VOICE_ROOM, "face", key, secret,
                              metadata={"stt_language": stt_language()})

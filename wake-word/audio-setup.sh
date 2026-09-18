@@ -13,7 +13,12 @@ set -u
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 
 XVF_NAME="${XVF_NAME:-XVF3800}"
-SPK_LEVEL="${SPK_LEVEL:-100%}"
+# 85%, deliberately not 100%. At full output the robot hears itself through the
+# room loudly enough that the XVF3800's canceller cannot subtract it all, and the
+# agent starts transcribing its own voice. The other end of the scale is just as
+# wrong: the shipped 67% is -20 dB and sounds broken. Change this only with a
+# real call to judge it by.
+SPK_LEVEL="${SPK_LEVEL:-85%}"
 MIC_SOURCE=gerdoo_mic
 
 # ALSA mixer. There are TWO playback controls: PCM,0 (left/right) and PCM,1

@@ -1,0 +1,18 @@
+# Let the logged-in user talk to the reSpeaker XVF3800's control interface.
+#
+# Audio works without this — the board is a standard USB sound card. What needs
+# it is `xvf_host`, the tool that reads and writes the array's own DSP settings:
+# echo canceller behaviour, post-processing, gain, channel routing. Those are
+# the only way to change how hard the board suppresses the near end while it is
+# playing something, which is what makes the microphone go deaf during a video.
+#
+# Without the rule the device node is root:root and every xvf_host call needs
+# sudo, which a service cannot supply.
+#
+# Install (needs root once):
+#   sudo cp 99-respeaker-xvf3800.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+#
+# uaccess covers the user logged in at the seat, which is how the robot runs its
+# kiosk; the plugdev group is the fallback for a headless login over ssh.
+SUBSYSTEM=="usb", ATTRS{idVendor}=="2886", ATTRS{idProduct}=="001e", TAG+="uaccess", GROUP="plugdev", MODE="0660"

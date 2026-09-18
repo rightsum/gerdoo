@@ -13,7 +13,8 @@ ExecStart=/usr/bin/mpv --idle=yes --force-window=no --fullscreen \
     --input-ipc-server=%t/gerdoo-mpv.sock \
     --script-opts=ytdl_hook-ytdl_path=%h/.local/bin/yt-dlp \
     --ytdl-format=bestvideo[height<=1080]+bestaudio/best \
-    --no-terminal --no-osc --cursor-autohide=always --keep-open=no
+    --no-terminal --no-osc --cursor-autohide=always --keep-open=no \
+    --script=%h/robot-face/deploy/mpv-seek.lua
 Restart=always
 RestartSec=5
 

@@ -183,7 +183,9 @@ def status():
     }
 
 
-RESOLVE_TIMEOUT_S = 25
+# Searching YouTube from the robot is wildly variable: the same query measured
+# 4s, then twice ran past two minutes. 25s tripped during a real conversation.
+RESOLVE_TIMEOUT_S = 40
 
 
 def _run(args, timeout=RESOLVE_TIMEOUT_S):
@@ -221,7 +223,14 @@ def resolve(target):
             title = None
         return target, title
 
-    out = _run(["--no-playlist", "--print", "%(id)s|%(title)s",
+    # -I 1 is a fix, not an optimisation. Without it yt-dlp printed a usable
+    # result within seconds and then kept working for minutes — and subprocess
+    # waits for the process to EXIT, so a search that had already answered still
+    # hit the timeout and the robot said it could not find anything. Measured on
+    # the robot: 3-4s with it; 4s once and twice past two minutes without.
+    # --flat-playlist is faster still, but its top hit for a singer's name is the
+    # artist's CHANNEL rather than a video, so it cannot be used here.
+    out = _run(["--no-playlist", "-I", "1", "--print", "%(id)s|%(title)s",
                 f"ytsearch1:{target}"])
     if not out or "|" not in out:
         raise VideoError(f"nothing found for {target!r}")

@@ -32,7 +32,8 @@ NNN-YYYY-MM-DD-short-title.md
 | [016](016-2026-09-02-agent-tools-search-and-time.md) | 2026-09-02 | Agent tools — web search and a clock with the Persian calendar, so it can answer about the outside world | ✅ Working |
 | [017](017-2026-09-03-face-tracking.md) | 2026-09-03 | The neck follows your face during a call, replacing gesture detection — and three definitions of "centre" that disagreed | ✅ Working |
 | [018](018-2026-09-15-xvf3800-hardware-aec.md) | 2026-09-15 | reSpeaker XVF3800 becomes the robot's mic and speaker — hardware echo cancellation, every software echo workaround removed, a hidden -20 dB volume control | ✅ Deployed · 🔄 Barge-in and wake-word range to re-test |
-| [019](019-2026-09-18-video-playback.md) | 2026-09-18 | YouTube video playback on the kiosk screen — mpv + yt-dlp over JSON IPC, a call takes the screen and video resumes after, a Persian stop phrase | 🔄 Code complete, reviewed · ⏳ Not yet deployed or verified against real hardware |
+| [019](019-2026-09-18-video-playback.md) | 2026-09-18 | YouTube video playback on the kiosk screen — mpv + yt-dlp over JSON IPC, a call takes the screen and video resumes after, a Persian stop phrase | ✅ Deployed — see 020 |
+| [020](020-2026-09-18-video-playback-deployed.md) | 2026-09-18 | Deploying it: the search that answered early and exited late, a microphone source that vanished silently, an agent answering before the question ended — and six wrong theories about a deaf microphone | ✅ Playback working · ⏳ Wake word during loud playback unresolved |
 
 Entries are either **problems** (001, 003) or **design decision records** (002). Both belong here — a decision you cannot reconstruct the reasoning for is as expensive as a bug you cannot reproduce.
 
