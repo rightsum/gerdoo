@@ -274,11 +274,20 @@ def _video_resume_after_call():
     record = _pending()
     if not record:
         return
+    # Clear the record whether the resume succeeds or fails. A stuck record
+    # asserts "this video is coming" to /api/video/status forever, so the
+    # panel would advertise a video that will never play. The player unit
+    # restarts itself (Restart=always), so a failure here is usually worse
+    # than a transient blip a silent retry could heal, and recovery is one
+    # click away — the panel's Play button or asking again by voice. Do not
+    # "fix" this back into a retry without dealing with that lie.
     try:
         video.play_url(record["url"], start=record.get("start") or None)
-        _set_pending(None)
     except video.VideoError as e:
-        app.logger.warning("video: could not resume after the call (%s)", e)
+        app.logger.warning(
+            "video: could not resume after the call (%s) - dropping pending video", e)
+    finally:
+        _set_pending(None)
 
 
 def _set_voice(state, detail=""):

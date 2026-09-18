@@ -191,3 +191,17 @@ def test_a_dead_player_does_not_break_a_call(client, monkeypatch):
     monkeypatch.setattr(video, "status", boom)
     robot_app._set_voice("connecting")          # must not raise
     assert client._state["voice"] == "connecting"
+
+
+def test_a_failed_resume_does_not_break_a_call_or_stay_pending(client, monkeypatch):
+    client._state["voice"] = "listening"
+    client._state["video_pending"] = {
+        "url": "https://youtu.be/abc123", "title": "Talagh", "start": 42}
+
+    def boom(url, start=None):
+        raise video.VideoError("player not running")
+
+    monkeypatch.setattr(video, "play_url", boom)
+    robot_app._set_voice("idle")                # must not raise
+    assert client._state["voice"] == "idle"
+    assert client._state["video_pending"] is None
