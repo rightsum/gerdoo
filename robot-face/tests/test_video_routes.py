@@ -145,3 +145,49 @@ def test_status_includes_deferred(client):
     client._state["video_pending"] = {"url": "u", "title": "t", "start": 0}
     r = client.get("/api/video/status", headers=hdr())
     assert r.get_json()["deferred"] is True
+
+
+def test_a_call_stops_a_playing_video_and_remembers_where(client, monkeypatch):
+    stopped = []
+    monkeypatch.setattr(video, "status", lambda: {
+        "playing": True, "paused": False, "title": "Talagh",
+        "position": 42, "duration": 200})
+    monkeypatch.setattr(video, "stop", lambda: stopped.append(True))
+    monkeypatch.setattr(robot_app, "_current_url", lambda: "https://youtu.be/abc123")
+
+    robot_app._set_voice("connecting")
+
+    assert stopped == [True]
+    assert client._state["video_pending"] == {
+        "url": "https://youtu.be/abc123", "title": "Talagh", "start": 42}
+
+
+def test_the_call_ending_resumes_the_video(client, monkeypatch):
+    played = []
+    client._state["voice"] = "listening"
+    client._state["video_pending"] = {
+        "url": "https://youtu.be/abc123", "title": "Talagh", "start": 42}
+    monkeypatch.setattr(video, "play_url",
+                        lambda url, start=None: played.append((url, start)))
+
+    robot_app._set_voice("idle")
+
+    assert played == [("https://youtu.be/abc123", 42)]
+    assert client._state["video_pending"] is None
+
+
+def test_nothing_playing_means_nothing_to_remember(client, monkeypatch):
+    monkeypatch.setattr(video, "status", lambda: {
+        "playing": False, "paused": False, "title": None,
+        "position": None, "duration": None})
+    robot_app._set_voice("connecting")
+    assert client._state["video_pending"] is None
+
+
+def test_a_dead_player_does_not_break_a_call(client, monkeypatch):
+    def boom():
+        raise video.VideoError("player not running")
+
+    monkeypatch.setattr(video, "status", boom)
+    robot_app._set_voice("connecting")          # must not raise
+    assert client._state["voice"] == "connecting"

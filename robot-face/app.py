@@ -242,14 +242,61 @@ def _voice_cfg():
     )
 
 
+def _current_url():
+    """The URL mpv is playing, for remembering across a call."""
+    return video.command("get_property", "path")
+
+
+def _video_yield_to_call():
+    """
+    Stop a playing video and remember where it was.
+
+    Pausing would leave mpv's window on screen covering the face, so a call
+    would happen behind a frozen frame. Stopping takes the window away; the
+    position comes back on resume. The cost is a second of re-buffering
+    afterwards, which is cheaper than juggling windows with the WM.
+    """
+    try:
+        st = video.status()
+        if not st.get("playing"):
+            return
+        url = _current_url()
+        if not url:
+            return
+        _set_pending({"url": url, "title": st.get("title"),
+                      "start": st.get("position") or 0})
+        video.stop()
+    except video.VideoError as e:
+        app.logger.warning("video: could not pause for the call (%s)", e)
+
+
+def _video_resume_after_call():
+    record = _pending()
+    if not record:
+        return
+    try:
+        video.play_url(record["url"], start=record.get("start") or None)
+        _set_pending(None)
+    except video.VideoError as e:
+        app.logger.warning("video: could not resume after the call (%s)", e)
+
+
 def _set_voice(state, detail=""):
     """Update voice state and push it to the face over the existing SSE."""
+    was = load_state().get("voice", "idle")
+    # The screen belongs to the call: a video steps aside when one starts and
+    # comes back when it ends. This is also what makes a video requested DURING
+    # a call start afterwards — both use the same pending record.
+    if state != "idle" and was == "idle":
+        _video_yield_to_call()
     s = load_state()
     s["voice"] = state
     s["voice_detail"] = detail
     s["updated"] = time.time()
     save_state(s)
     broadcast(s)
+    if state == "idle" and was != "idle":
+        _video_resume_after_call()
     return s
 
 
