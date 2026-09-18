@@ -1422,6 +1422,39 @@ service start. Run it by hand whenever audio misbehaves — it prints what it fo
 
 ---
 
+## 🎬 Video
+
+### mpv + yt-dlp — video playback on the kiosk screen — ✅ in service
+
+| | |
+|---|---|
+| **Player** | One long-lived `mpv --idle`, owned by `video-player.service` (systemd `--user`, boot-enabled). Idle = no window, so the kiosk face stays visible until a video is loaded |
+| **Source resolution** | `yt-dlp` — a URL is played directly; a search phrase goes through `yt-dlp "ytsearch1:..."` |
+| **Control** | mpv's JSON IPC socket at `%t/gerdoo-mpv.sock`, i.e. `$XDG_RUNTIME_DIR/gerdoo-mpv.sock`, typically `/run/user/<uid>/gerdoo-mpv.sock` |
+| **Auth** | Shared secret `video_token` in the robot's gitignored `robot-face/config.json`, matched by `VIDEO_BASE_URL` / `VIDEO_API_TOKEN` in the gitignored `voice-agent/.env`. Never write a real token or hostname into any committed file |
+| **Unit file** | `robot-face/deploy/video-player.service` |
+
+⚠️ **`yt-dlp` comes from `pip`, not `apt`.** Ubuntu's apt candidate is a 2022
+build and fails against today's YouTube. Install/update on the robot with:
+
+```bash
+pip3 install --user --upgrade yt-dlp
+```
+
+This is the piece most likely to rot silently — YouTube changes its signing
+and throttling, an old `yt-dlp` just stops resolving, and nothing in the
+package manager will ever flag it.
+
+⚠️ **Audio ceiling: 16 kHz**, inherited from the XVF3800 (see 🔊 Audio above —
+the robot's only playback device is capture/playback-locked to 16 kHz
+S16_LE). Speech is fine; music through it will sound like a phone call.
+
+Full design, the behaviour around voice calls, and a deployment trap in the
+wake-word service are in
+[`docs/logs/019-2026-09-18-video-playback.md`](docs/logs/019-2026-09-18-video-playback.md).
+
+---
+
 ## 🏎️ RC Car / Robot Wheels & Parts
 
 ### 1/10 RC Drift Car Tires + Alloy Wheels (black)

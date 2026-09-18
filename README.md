@@ -31,7 +31,7 @@ Everything below is working documentation, written for me and for the agents hel
 | [`docs/logs/`](docs/logs/) | One write-up per problem or design decision: evidence, wrong turns, root cause, fix, verification |
 | [`teensy_bringup/`](teensy_bringup/) | Minimal health-check firmware + `health_check.py` |
 | [`teensy_microros/`](teensy_microros/) | micro-ROS node. Dual Serial, console preserved |
-| [`robot-face/`](robot-face/) | Kiosk face on the robot's screen + LAN control panel (mood, camera stream, live LiDAR view) |
+| [`robot-face/`](robot-face/) | Kiosk face on the robot's screen + LAN control panel (mood, camera stream, live LiDAR view, video playback) |
 | [`voice-agent/`](voice-agent/) | LiveKit voice agent. Runs on the Mac, the Jetson joins the room |
 | [`wake-word/`](wake-word/) | Persian wake word, offline Vosk |
 
