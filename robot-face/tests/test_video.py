@@ -1,5 +1,8 @@
 import json
+import os
+import shutil
 import socket
+import tempfile
 import threading
 
 import pytest
@@ -77,8 +80,8 @@ def test_a_word_with_a_dot_is_still_a_search():
 class FakeMpv:
     """A unix socket that answers mpv's JSON IPC, for tests."""
 
-    def __init__(self, tmp_path, replies=None, silent=False):
-        self.path = str(tmp_path / "mpv.sock")
+    def __init__(self, sock_dir, replies=None, silent=False):
+        self.path = os.path.join(sock_dir, "mpv.sock")
         self.replies = replies or {}
         self.silent = silent
         self.received = []
@@ -123,11 +126,18 @@ class FakeMpv:
 
 
 @pytest.fixture
-def fake_mpv(tmp_path, monkeypatch):
+def fake_mpv(monkeypatch):
     made = []
+    # Deliberately not pytest's tmp_path: its default root nests under
+    # pytest-of-<user>/pytest-N/<test-name>N/, and that plus "mpv.sock"
+    # routinely exceeds macOS's ~104-byte sockaddr_un limit (108 on Linux),
+    # so the bind() below fails before the client is ever exercised. /tmp
+    # is named explicitly rather than via tempfile's default gettempdir(),
+    # because on macOS TMPDIR itself is the long path that causes this.
+    sock_dir = tempfile.mkdtemp(dir="/tmp")
 
     def make(replies=None, silent=False):
-        m = FakeMpv(tmp_path, replies=replies, silent=silent)
+        m = FakeMpv(sock_dir, replies=replies, silent=silent)
         monkeypatch.setattr(video, "SOCKET_PATH", m.path)
         made.append(m)
         return m
@@ -135,6 +145,7 @@ def fake_mpv(tmp_path, monkeypatch):
     yield make
     for m in made:
         m.close()
+    shutil.rmtree(sock_dir, ignore_errors=True)
 
 
 def test_command_returns_the_data(fake_mpv):
