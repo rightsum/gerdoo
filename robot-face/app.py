@@ -10,6 +10,7 @@ Serves three things on one port:
 Mood changes made in /control are pushed to every open face over Server-Sent Events,
 so the robot's expression updates instantly with no page refresh.
 """
+import hmac
 import json
 import os
 import time
@@ -409,7 +410,13 @@ def video_guard():
     """None to proceed, or a response to abort with."""
     token = load_config().get("video_token", "")
     sent = request.headers.get("X-Video-Token", "")
-    if token and sent and sent == token:
+    # Constant-time compare: this is the one shared secret in the system, and
+    # a plain `==` leaks how many leading bytes matched through its timing. A
+    # future reader must not "simplify" this back to `==`. Comparing as UTF-8
+    # bytes (not str) also keeps a non-ASCII header from raising TypeError out
+    # of compare_digest — it must deny cleanly, not 500.
+    if token and sent and hmac.compare_digest(
+            token.encode("utf-8"), sent.encode("utf-8")):
         return None
     if logged_in() or local_only():
         return None

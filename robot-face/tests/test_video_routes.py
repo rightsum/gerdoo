@@ -52,6 +52,31 @@ def test_play_rejects_a_wrong_token(client):
     assert r.status_code == 403
 
 
+def test_play_rejects_a_non_ascii_token(client):
+    # hmac.compare_digest raises TypeError on a non-ASCII str; the guard
+    # must deny cleanly (403), not 500.
+    r = client.post("/api/video/play", json={"url_or_query": "x"},
+                    headers=hdr("نه"))
+    assert r.status_code == 403
+
+
+def test_the_localhost_arm_lets_a_local_caller_in_with_no_token(client, monkeypatch):
+    # One of video_guard()'s three documented ways in: a request from this
+    # machine itself, with no token and no session at all.
+    monkeypatch.setattr(robot_app, "local_only", lambda: True)
+    r = client.post("/api/video/stop")
+    assert r.status_code == 200
+
+
+def test_the_session_arm_lets_a_logged_in_caller_in_with_no_token(client):
+    # The other documented way in: a logged-in control-panel session, from a
+    # non-local address, with no token.
+    with client.session_transaction() as s:
+        s["auth"] = True
+    r = client.post("/api/video/stop")
+    assert r.status_code == 200
+
+
 def test_play_starts_a_video(client):
     r = client.post("/api/video/play",
                     data=json.dumps({"url_or_query": "talagh"}), headers=hdr())
