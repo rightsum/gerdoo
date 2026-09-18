@@ -359,12 +359,16 @@
     es.onmessage = (ev) => { try { reflect(JSON.parse(ev.data)); } catch {} };
     reflect({{ state | tojson }});
 
-    // ------------------------------------------------------------------
-    // Sensor panels. Only wired up when a password exists — without one the
-    // server refuses these endpoints anyway (403 password_required), so the
-    // controls are rendered disabled rather than failing on click.
-    // ------------------------------------------------------------------
-    {% if has_password %}
+    // Shared by every panel below, including the Video card, which sits
+    // outside the has_password Jinja guard just below this: video's own
+    // endpoints are not password-gated server-side (video_guard() has no
+    // password_is_set() check, unlike sensor_guard()), so this must be
+    // reachable whether or not that guard renders. It used to live inside
+    // the guard, which left the Video card's api() calls throwing
+    // ReferenceError with no panel password set — refreshVideo() caught it
+    // and showed "unreachable" forever, and Play toasted "api is not
+    // defined". Keep new top-level symbols here unless they are only ever
+    // used inside the guard.
     async function api(path, method, body) {
       const opts = { method: method || 'GET' };
       if (body !== undefined) {
@@ -377,6 +381,13 @@
       if (!r.ok) throw new Error(body_.message || body_.error || 'request failed');
       return body_;
     }
+
+    // ------------------------------------------------------------------
+    // Sensor panels. Only wired up when a password exists — without one the
+    // server refuses these endpoints anyway (403 password_required), so the
+    // controls are rendered disabled rather than failing on click.
+    // ------------------------------------------------------------------
+    {% if has_password %}
 
     // ---- Voice ----
     const voiceToggle = document.getElementById('voice-toggle');

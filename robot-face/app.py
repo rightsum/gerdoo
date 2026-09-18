@@ -255,16 +255,31 @@ def _video_yield_to_call():
     would happen behind a frozen frame. Stopping takes the window away; the
     position comes back on resume. The cost is a second of re-buffering
     afterwards, which is cheaper than juggling windows with the WM.
+
+    Whether there is something to yield is decided from mpv's `path` (via
+    _current_url()), not status()["playing"]. loadfile is asynchronous and
+    mpv's own ytdl_hook re-resolves the URL, so `playing` stays false for
+    seconds after play_url() returns while `path` is set as soon as loadfile
+    is accepted. Keying off `playing` let a call starting in that window see
+    "not playing", record nothing, and return — the video then appeared
+    fullscreen over the call with no pending record and nothing left to stop
+    it. Once there is a path, stop() runs unconditionally: stopping an
+    already-idle player is harmless, and doing it every time is what
+    guarantees nothing survives into the call.
     """
     try:
-        st = video.status()
-        if not st.get("playing"):
-            return
         url = _current_url()
         if not url:
             return
-        _set_pending({"url": url, "title": st.get("title"),
-                      "start": st.get("position") or 0})
+        st = video.status()
+        # Position is unavailable while mpv is still resolving the URL (the
+        # window above). Reuse whichever start time is already on file for
+        # this video rather than inventing one — 0 only if nothing was ever
+        # recorded.
+        position = st.get("position")
+        if position is None:
+            position = (_pending() or {}).get("start") or 0
+        _set_pending({"url": url, "title": st.get("title"), "start": position})
         video.stop()
     except video.VideoError as e:
         app.logger.warning("video: could not pause for the call (%s)", e)

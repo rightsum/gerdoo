@@ -177,18 +177,55 @@ def test_the_call_ending_resumes_the_video(client, monkeypatch):
 
 
 def test_nothing_playing_means_nothing_to_remember(client, monkeypatch):
+    # No path means nothing was ever loaded — the yield decision, so nothing
+    # further should even be read from status().
+    monkeypatch.setattr(robot_app, "_current_url", lambda: None)
+    robot_app._set_voice("connecting")
+    assert client._state["video_pending"] is None
+
+
+def test_a_loading_video_is_still_yielded_to_a_call(client, monkeypatch):
+    # `playing` is false for seconds after play_url() while mpv's ytdl_hook
+    # re-resolves the URL; `path` is set as soon as loadfile is accepted.
+    # Keying the yield off status()["playing"] let a video that was still
+    # loading survive into a live call and pop up fullscreen mid-conversation.
+    stopped = []
     monkeypatch.setattr(video, "status", lambda: {
         "playing": False, "paused": False, "title": None,
         "position": None, "duration": None})
+    monkeypatch.setattr(video, "stop", lambda: stopped.append(True))
+    monkeypatch.setattr(robot_app, "_current_url",
+                        lambda: "https://youtu.be/abc123")
+
     robot_app._set_voice("connecting")
-    assert client._state["video_pending"] is None
+
+    assert stopped == [True]
+    assert client._state["video_pending"] == {
+        "url": "https://youtu.be/abc123", "title": None, "start": 0}
+
+
+def test_a_loading_video_falls_back_to_the_recorded_start(client, monkeypatch):
+    # Position is unavailable while still resolving; do not invent one when
+    # there is already a start time on file for this video.
+    client._state["video_pending"] = {
+        "url": "https://youtu.be/abc123", "title": "Talagh", "start": 42}
+    monkeypatch.setattr(video, "status", lambda: {
+        "playing": False, "paused": False, "title": None,
+        "position": None, "duration": None})
+    monkeypatch.setattr(video, "stop", lambda: None)
+    monkeypatch.setattr(robot_app, "_current_url",
+                        lambda: "https://youtu.be/abc123")
+
+    robot_app._set_voice("connecting")
+
+    assert client._state["video_pending"]["start"] == 42
 
 
 def test_a_dead_player_does_not_break_a_call(client, monkeypatch):
     def boom():
         raise video.VideoError("player not running")
 
-    monkeypatch.setattr(video, "status", boom)
+    monkeypatch.setattr(robot_app, "_current_url", boom)
     robot_app._set_voice("connecting")          # must not raise
     assert client._state["voice"] == "connecting"
 
