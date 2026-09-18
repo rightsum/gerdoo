@@ -111,6 +111,35 @@ Not applied (needs root / hardware):
 `xfce4-screensaver` blanks the panel on idle (ignoring `xset`). It's disabled via
 `xfconf` (`/saver/enabled=false`) and a `Hidden=true` autostart override.
 
+## Video playback
+
+A second **user** systemd service, `video-player` (`systemctl --user`), runs one
+long-lived `mpv --idle` that owns the screen whenever a video plays. Unlike
+`rplidar`/`face-track`, it is **enabled at boot**: the panel talks to it over its
+IPC socket, so mpv must already be up and listening before a video is requested.
+
+- Socket: `%t/gerdoo-mpv.sock` (i.e. `$XDG_RUNTIME_DIR/gerdoo-mpv.sock`, typically
+  `/run/user/<uid>/gerdoo-mpv.sock`).
+- With no video loaded, mpv keeps no window open, so the kiosk face stays visible;
+  loading a file opens a fullscreen window over the face, and `stop` closes it
+  again.
+
+Before deploying this unit, install its dependencies on the robot (not handled by
+`deploy.sh`, and not `sudo`-free — approve it yourself):
+
+```bash
+sudo apt-get install -y mpv socat
+pip3 install --user --upgrade yt-dlp
+```
+
+`socat` is only needed for talking to the mpv socket by hand (e.g. piping a
+`loadfile`/`stop` JSON command at it to check the unit); mpv itself only needs
+`yt-dlp`. Install `yt-dlp` via `pip3`, not `apt` — the Ubuntu
+22.04 package is frozen at a 2022 build and fails against today's YouTube, while
+`pip3 install --user --upgrade yt-dlp` tracks upstream releases that keep up with
+site changes. `video-player.service` points mpv at the pip copy explicitly
+(`--script-opts=ytdl_hook-ytdl_path=%h/.local/bin/yt-dlp`).
+
 ## Deploy / update
 
 From this project directory on your Mac:
@@ -141,6 +170,7 @@ templates/login.html           password login
 static/robot-face.js           the <robot-face> component (perf-tuned for Jetson)
 config.json / state.json       runtime (password hash, secret, current mood) — not in git
 deploy/robot-face.service      user systemd unit
+deploy/video-player.service    user systemd unit (idle mpv, owns the screen for video)
 deploy/robot-face-kiosk.desktop  kiosk autostart (GPU profile)
 deploy/firefox-kiosk.user.js   Firefox prefs: force GPU + kiosk hardening
 deploy/deploy.sh               one-command deploy

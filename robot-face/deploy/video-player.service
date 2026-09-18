@@ -1,0 +1,21 @@
+[Unit]
+Description=Video player — one idle mpv that owns the screen when a video plays
+After=robot-face.service
+Wants=robot-face.service
+
+[Service]
+Type=simple
+Environment=DISPLAY=:0
+# Idle with no window: the kiosk face stays visible until loadfile is sent, and
+# stop takes the window away again. --fullscreen applies to the window when it
+# does appear, so a video always covers the face.
+ExecStart=/usr/bin/mpv --idle=yes --force-window=no --fullscreen \
+    --input-ipc-server=%t/gerdoo-mpv.sock \
+    --script-opts=ytdl_hook-ytdl_path=%h/.local/bin/yt-dlp \
+    --ytdl-format=bestvideo[height<=1080]+bestaudio/best \
+    --no-terminal --no-osc --cursor-autohide=always --keep-open=no
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
