@@ -1,3 +1,7 @@
+import json
+import socket
+import threading
+
 import pytest
 
 import video
@@ -66,3 +70,144 @@ def test_bare_words_are_a_search():
 
 def test_a_word_with_a_dot_is_still_a_search():
     assert not video.looks_like_url("mr. bean cartoon")
+
+
+# ---- mpv IPC client ----
+
+class FakeMpv:
+    """A unix socket that answers mpv's JSON IPC, for tests."""
+
+    def __init__(self, tmp_path, replies=None, silent=False):
+        self.path = str(tmp_path / "mpv.sock")
+        self.replies = replies or {}
+        self.silent = silent
+        self.received = []
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.bind(self.path)
+        self.sock.listen(1)
+        self.thread = threading.Thread(target=self._serve, daemon=True)
+        self.thread.start()
+
+    def _serve(self):
+        while True:
+            try:
+                conn, _ = self.sock.accept()
+            except OSError:
+                return
+            with conn:
+                buf = b""
+                while b"\n" not in buf:
+                    chunk = conn.recv(4096)
+                    if not chunk:
+                        return
+                    buf += chunk
+                line = buf.split(b"\n", 1)[0]
+                req = json.loads(line)
+                self.received.append(req)
+                if self.silent:
+                    return
+                name = req["command"][0]
+                prop = req["command"][1] if len(req["command"]) > 1 else None
+                key = f"{name}:{prop}" if name == "get_property" else name
+                # An unrelated event first: the client must skip it.
+                conn.sendall(json.dumps({"event": "playback-restart"}).encode() + b"\n")
+                body = {"request_id": req.get("request_id", 0)}
+                if key in self.replies:
+                    body.update({"data": self.replies[key], "error": "success"})
+                else:
+                    body.update({"error": "property unavailable"})
+                conn.sendall(json.dumps(body).encode() + b"\n")
+
+    def close(self):
+        self.sock.close()
+
+
+@pytest.fixture
+def fake_mpv(tmp_path, monkeypatch):
+    made = []
+
+    def make(replies=None, silent=False):
+        m = FakeMpv(tmp_path, replies=replies, silent=silent)
+        monkeypatch.setattr(video, "SOCKET_PATH", m.path)
+        made.append(m)
+        return m
+
+    yield make
+    for m in made:
+        m.close()
+
+
+def test_command_returns_the_data(fake_mpv):
+    fake_mpv({"get_property:duration": 212.5})
+    assert video.command("get_property", "duration") == 212.5
+
+
+def test_command_skips_events_before_the_reply(fake_mpv):
+    m = fake_mpv({"get_property:time-pos": 12.0})
+    assert video.command("get_property", "time-pos") == 12.0
+    assert m.received[0]["command"] == ["get_property", "time-pos"]
+
+
+def test_unavailable_property_is_none_not_an_error(fake_mpv):
+    fake_mpv({})
+    assert video.command("get_property", "time-pos") is None
+
+
+def test_missing_socket_raises(monkeypatch, tmp_path):
+    monkeypatch.setattr(video, "SOCKET_PATH", str(tmp_path / "nope.sock"))
+    with pytest.raises(video.VideoError):
+        video.command("get_property", "duration")
+
+
+def test_a_silent_player_raises_rather_than_hanging(fake_mpv, monkeypatch):
+    fake_mpv(silent=True)
+    monkeypatch.setattr(video, "TIMEOUT_S", 0.3)
+    with pytest.raises(video.VideoError):
+        video.command("get_property", "duration")
+
+
+def test_play_sends_loadfile_with_a_start(fake_mpv):
+    m = fake_mpv({"loadfile": None})
+    video.play_url("https://youtu.be/abc123", start=90)
+    assert m.received[0]["command"] == [
+        "loadfile", "https://youtu.be/abc123", "replace", "start=90"]
+
+
+def test_play_without_a_start_sends_no_options(fake_mpv):
+    m = fake_mpv({"loadfile": None})
+    video.play_url("https://youtu.be/abc123")
+    assert m.received[0]["command"] == [
+        "loadfile", "https://youtu.be/abc123", "replace"]
+
+
+def test_status_reports_idle_as_not_playing(fake_mpv):
+    fake_mpv({"get_property:idle-active": True})
+    st = video.status()
+    assert st["playing"] is False
+    assert st["title"] is None
+
+
+def test_status_reports_a_playing_video(fake_mpv):
+    fake_mpv({
+        "get_property:idle-active": False,
+        "get_property:media-title": "Talagh",
+        "get_property:time-pos": 31.4,
+        "get_property:duration": 212.5,
+        "get_property:pause": False,
+    })
+    st = video.status()
+    assert st == {"playing": True, "paused": False, "title": "Talagh",
+                  "position": 31, "duration": 212}
+
+
+def test_pause_and_resume_set_the_property(fake_mpv):
+    m = fake_mpv({"set_property": None})
+    video.pause()
+    video.resume()
+    assert m.received[0]["command"] == ["set_property", "pause", True]
+
+
+def test_stop_sends_stop(fake_mpv):
+    m = fake_mpv({"stop": None})
+    video.stop()
+    assert m.received[0]["command"] == ["stop"]

@@ -82,3 +82,102 @@ def looks_like_url(target):
         return False
     parsed = urllib.parse.urlparse(target.strip())
     return parsed.scheme in ("http", "https") and bool(parsed.netloc)
+
+
+_request_id = 0
+
+
+def _next_id():
+    global _request_id
+    _request_id += 1
+    return _request_id
+
+
+def command(*args):
+    """
+    Send one command to mpv and return its `data`, or None if unavailable.
+
+    A fresh connection per command: mpv's socket is happy with it, and it means
+    no shared reader that could hand one caller another's reply. Events arriving
+    mid-exchange are skipped — only the reply carrying our request_id counts.
+
+    Raises VideoError if the player is not there or does not answer. "Not
+    playing" is never an error; it is a status.
+    """
+    req_id = _next_id()
+    payload = json.dumps({"command": list(args), "request_id": req_id}) + "\n"
+
+    with _lock:
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.settimeout(TIMEOUT_S)
+        try:
+            s.connect(SOCKET_PATH)
+        except (FileNotFoundError, ConnectionRefusedError, OSError) as e:
+            raise VideoError(f"player not running ({e.__class__.__name__})")
+        try:
+            s.sendall(payload.encode())
+            buf = b""
+            while True:
+                try:
+                    chunk = s.recv(4096)
+                except socket.timeout:
+                    raise VideoError("player did not answer")
+                if not chunk:
+                    raise VideoError("player closed the connection")
+                buf += chunk
+                while b"\n" in buf:
+                    raw, buf = buf.split(b"\n", 1)
+                    if not raw.strip():
+                        continue
+                    try:
+                        msg = json.loads(raw)
+                    except json.JSONDecodeError:
+                        continue
+                    # Asynchronous events carry no request_id. Not ours.
+                    if "event" in msg:
+                        continue
+                    if msg.get("request_id") != req_id:
+                        continue
+                    if msg.get("error") not in ("success", None):
+                        return None        # e.g. property unavailable in idle
+                    return msg.get("data")
+        finally:
+            s.close()
+
+
+def play_url(url, start=None):
+    """Load and play a URL, optionally from `start` seconds in."""
+    args = ["loadfile", url, "replace"]
+    if start:
+        args.append(f"start={int(start)}")
+    command(*args)
+
+
+def stop():
+    command("stop")
+
+
+def pause():
+    command("set_property", "pause", True)
+
+
+def resume():
+    command("set_property", "pause", False)
+
+
+def _seconds(value):
+    return int(value) if isinstance(value, (int, float)) else None
+
+
+def status():
+    """What is on screen right now, straight from the player."""
+    if command("get_property", "idle-active"):
+        return {"playing": False, "paused": False, "title": None,
+                "position": None, "duration": None}
+    return {
+        "playing": True,
+        "paused": bool(command("get_property", "pause")),
+        "title": command("get_property", "media-title"),
+        "position": _seconds(command("get_property", "time-pos")),
+        "duration": _seconds(command("get_property", "duration")),
+    }
