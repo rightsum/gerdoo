@@ -57,12 +57,18 @@ ssh "$ROBOT" "export XDG_RUNTIME_DIR=/run/user/\$(id -u); \
 # Enabled at boot, unlike lidar and face-track above: the control panel talks
 # to mpv over its IPC socket, so mpv must already be up and listening whenever
 # a video is requested, not started on demand.
+#
+# mpv itself is installed by hand (see README), not by this script, so on a
+# robot that doesn't have it yet the unit will enable but sit restarting.
+# That check must not abort the deploy — a run for an unrelated change would
+# otherwise skip kiosk-autostart and the final banner just because mpv isn't
+# installed yet.
 echo "==> Installing + starting video-player unit (systemctl --user, no sudo)"
 ssh "$ROBOT" "export XDG_RUNTIME_DIR=/run/user/\$(id -u); \
   cp $DEST/deploy/video-player.service ~/.config/systemd/user/video-player.service; \
   systemctl --user daemon-reload; \
   systemctl --user enable --now video-player; \
-  sleep 2; systemctl --user is-active video-player"
+  sleep 2; systemctl --user is-active video-player || echo 'video-player: not active — install mpv on the robot first'"
 
 echo "==> Installing kiosk autostart (replaces the old placetory autostart)"
 ssh "$ROBOT" "cp $DEST/deploy/robot-face-kiosk.desktop ~/.config/autostart/robot-face-kiosk.desktop; \

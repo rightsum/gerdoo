@@ -124,6 +124,10 @@ IPC socket, so mpv must already be up and listening before a video is requested.
   loading a file opens a fullscreen window over the face, and `stop` closes it
   again.
 
+`deploy.sh` enables and starts this unit unconditionally; if mpv isn't installed
+yet, `systemctl --user is-active video-player` reports it as not active and
+`deploy.sh` prints a note and carries on — that's expected, not a failed deploy.
+
 Before deploying this unit, install its dependencies on the robot (not handled by
 `deploy.sh`, and not `sudo`-free — approve it yourself):
 
