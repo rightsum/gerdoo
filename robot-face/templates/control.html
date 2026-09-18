@@ -645,7 +645,18 @@
 
     async function refreshVideo() {
       try { vidReflect(await api('/api/video/status')); }
-      catch { vidText.textContent = 'unreachable'; }
+      catch {
+        // Repaint to a coherent idle state rather than just setting the text:
+        // this card shows a title, a running clock and a lit LED, not just a
+        // status word, so leaving those frozen next to "unreachable" would
+        // have the card asserting two contradictory things at once.
+        vidPlaying = false;
+        vidStatus.classList.remove('on');
+        vidNow.style.display = 'none';
+        vidTitle.textContent = '';
+        vidTime.textContent = '';
+        vidText.textContent = 'unreachable';
+      }
     }
 
     refreshVideo();
