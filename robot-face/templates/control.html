@@ -151,6 +151,39 @@
       </div>
     </section>
 
+    <!-- ---------------- Video ---------------- -->
+    <section class="panel" id="video-panel">
+      <div class="panel-head">
+        <h2>Video</h2>
+        <span class="status" id="vid-status"><span class="led"></span><span id="vid-status-text">idle</span></span>
+      </div>
+      <div class="panel-body">
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <input id="vid-target" placeholder="YouTube URL or search"
+                 style="flex:1;min-width:180px;background:#1a2438;color:#e0e6f0;
+                        border:1px solid #2a3a5a;border-radius:6px;padding:8px;font-size:13px">
+          <input id="vid-start" placeholder="start (1:30)"
+                 style="width:110px;background:#1a2438;color:#e0e6f0;
+                        border:1px solid #2a3a5a;border-radius:6px;padding:8px;font-size:13px">
+          <button id="vid-play" style="cursor:pointer;border:1px solid #2a3a5a;border-radius:6px;
+                  background:#1a2438;color:#e0e6f0;padding:8px 14px;font-size:13px">Play</button>
+        </div>
+        <p class="hint" id="vid-hint">Plays on the robot's screen. A call pauses it;
+          it resumes when the call ends. Say <span style="font-family:ui-monospace,monospace">گردو بسه</span> to stop.</p>
+        <div id="vid-now" style="display:none;margin-top:10px">
+          <div id="vid-title" style="font-size:13px;color:#e0e6f0;margin-bottom:6px"></div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <span id="vid-time" style="font-size:12px;color:#8493b3;font-family:ui-monospace,monospace">0:00 / 0:00</span>
+            <span style="flex:1"></span>
+            <button id="vid-pause" style="cursor:pointer;border:1px solid #2a3a5a;border-radius:6px;
+                    background:#1a2438;color:#e0e6f0;padding:6px 12px;font-size:13px">Pause</button>
+            <button id="vid-stop" style="cursor:pointer;border:1px solid #2a3a5a;border-radius:6px;
+                    background:#1a2438;color:#e0e6f0;padding:6px 12px;font-size:13px">Stop</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <section class="panel" id="camera-panel">
       <div class="panel-head">
         <h2>Camera</h2>
@@ -332,12 +365,17 @@
     // controls are rendered disabled rather than failing on click.
     // ------------------------------------------------------------------
     {% if has_password %}
-    async function api(path, method) {
-      const r = await fetch(path, { method: method || 'GET' });
+    async function api(path, method, body) {
+      const opts = { method: method || 'GET' };
+      if (body !== undefined) {
+        opts.headers = { 'Content-Type': 'application/json' };
+        opts.body = JSON.stringify(body);
+      }
+      const r = await fetch(path, opts);
       if (r.status === 401) { location.href = '/login'; throw new Error('auth'); }
-      const body = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(body.message || body.error || 'request failed');
-      return body;
+      const body_ = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body_.message || body_.error || 'request failed');
+      return body_;
     }
 
     // ---- Voice ----
@@ -549,6 +587,72 @@
     }
 
     {% endif %}
+
+    // ---- Video ----
+    const vidTarget = document.getElementById('vid-target');
+    const vidStart  = document.getElementById('vid-start');
+    const vidNow    = document.getElementById('vid-now');
+    const vidTitle  = document.getElementById('vid-title');
+    const vidTime   = document.getElementById('vid-time');
+    const vidStatus = document.getElementById('vid-status');
+    const vidText   = document.getElementById('vid-status-text');
+    const vidPause  = document.getElementById('vid-pause');
+    let vidPlaying = false;
+
+    function clock(s) {
+      if (s == null) return '0:00';
+      const m = Math.floor(s / 60), r = Math.floor(s % 60);
+      return m + ':' + String(r).padStart(2, '0');
+    }
+
+    function vidReflect(st) {
+      vidPlaying = !!(st && st.playing);
+      vidStatus.classList.toggle('on', vidPlaying);
+      vidText.textContent = st && st.deferred ? 'after the call'
+                          : (vidPlaying ? (st.paused ? 'paused' : 'playing') : 'idle');
+      vidNow.style.display = vidPlaying ? 'block' : 'none';
+      if (vidPlaying) {
+        vidTitle.textContent = st.title || '';
+        vidTime.textContent = clock(st.position) + ' / ' + clock(st.duration);
+        vidPause.textContent = st.paused ? 'Resume' : 'Pause';
+      }
+    }
+
+    document.getElementById('vid-play').addEventListener('click', async () => {
+      const target = vidTarget.value.trim();
+      if (!target) return;
+      try {
+        const d = await api('/api/video/play', 'POST',
+                            { url_or_query: target, start: vidStart.value.trim() });
+        showToast(d.deferred ? 'Plays when the call ends' : ('Playing ' + (d.title || '')));
+        vidTarget.value = '';
+        refreshVideo();
+      } catch (e) { showToast(e.message); }
+    });
+
+    vidPause.addEventListener('click', async () => {
+      try {
+        const st = await api('/api/video/status');
+        await api('/api/video/' + (st.paused ? 'resume' : 'pause'), 'POST');
+        refreshVideo();
+      } catch (e) { showToast(e.message); }
+    });
+
+    document.getElementById('vid-stop').addEventListener('click', async () => {
+      try { await api('/api/video/stop', 'POST'); showToast('Stopped'); refreshVideo(); }
+      catch (e) { showToast(e.message); }
+    });
+
+    async function refreshVideo() {
+      try { vidReflect(await api('/api/video/status')); }
+      catch { vidText.textContent = 'unreachable'; }
+    }
+
+    refreshVideo();
+    // One second while something is playing, so the position moves; slower when
+    // idle, because then there is nothing to watch.
+    setInterval(() => { if (vidPlaying) refreshVideo(); }, 1000);
+    setInterval(refreshVideo, 5000);
 
     // ---- Battery ----
     async function pollBattery() {
