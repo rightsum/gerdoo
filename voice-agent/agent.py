@@ -77,6 +77,11 @@ async def look_it_up(context: RunContext, query: str) -> str:
 # Set by play_video. The entrypoint waits on it and shuts the session down once
 # she has finished speaking: the video wants the screen and the speaker, and a
 # call sitting on top of it would both compete for audio and hold the face.
+#
+# Module-level, but each job gets its own fresh subprocess under the default
+# PROCESS executor, so this Event is already per-job by construction. It would
+# only be shared across jobs under JobExecutorType.THREAD (what `agent.py
+# console` forces).
 end_call = asyncio.Event()
 
 
@@ -245,8 +250,10 @@ def _trace(msg):
 
 async def entrypoint(ctx: JobContext):
     _trace("entrypoint ENTER")
-    # The worker process is reused between jobs, so a flag left set by a
-    # previous call's play_video would end this new call the instant it began.
+    # Defensive, not required today: under PROCESS (the default), each job is
+    # its own subprocess, so end_call starts unset regardless. This only
+    # matters if the executor ever becomes THREAD, where a flag left set by a
+    # previous call would end the next one instantly.
     end_call.clear()
     await ctx.connect()
     _trace("connected to room")
