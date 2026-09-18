@@ -181,3 +181,49 @@ def status():
         "position": _seconds(command("get_property", "time-pos")),
         "duration": _seconds(command("get_property", "duration")),
     }
+
+
+RESOLVE_TIMEOUT_S = 25
+
+
+def _run(args, timeout=RESOLVE_TIMEOUT_S):
+    """Run yt-dlp and return its stdout. The single seam tests replace."""
+    try:
+        p = subprocess.run([YTDLP, *args], capture_output=True, text=True,
+                           timeout=timeout)
+    except FileNotFoundError:
+        raise VideoError("yt-dlp is not installed")
+    except subprocess.TimeoutExpired:
+        raise VideoError("yt-dlp timed out")
+    if p.returncode != 0:
+        first = (p.stderr or "").strip().splitlines()
+        raise VideoError(first[-1] if first else "yt-dlp failed")
+    return p.stdout.strip()
+
+
+def resolve(target):
+    """
+    (url, title) for something to play.
+
+    A search phrase goes through yt-dlp's own search. A URL is kept exactly as
+    given and only its title is looked up — and if that lookup fails, playback
+    still proceeds with no title, because a URL the user pasted is a URL they
+    want played.
+    """
+    target = (target or "").strip()
+    if not target:
+        raise ValueError("nothing to play")
+
+    if looks_like_url(target):
+        try:
+            title = _run(["--no-playlist", "--print", "%(title)s", target]) or None
+        except VideoError:
+            title = None
+        return target, title
+
+    out = _run(["--no-playlist", "--print", "%(id)s|%(title)s",
+                f"ytsearch1:{target}"])
+    if not out or "|" not in out:
+        raise VideoError(f"nothing found for {target!r}")
+    video_id, _, title = out.partition("|")
+    return f"https://www.youtube.com/watch?v={video_id}", title.strip() or None

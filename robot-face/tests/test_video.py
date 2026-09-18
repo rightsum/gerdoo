@@ -222,3 +222,47 @@ def test_stop_sends_stop(fake_mpv):
     m = fake_mpv({"stop": None})
     video.stop()
     assert m.received[0]["command"] == ["stop"]
+
+
+# ---- resolve ----
+
+def test_resolve_searches_for_bare_words(monkeypatch):
+    calls = []
+
+    def fake_run(args, timeout=None):
+        calls.append(args)
+        return "abc123|Googoosh - Talagh"
+
+    monkeypatch.setattr(video, "_run", fake_run)
+    url, title = video.resolve("googoosh talagh")
+    assert url == "https://www.youtube.com/watch?v=abc123"
+    assert title == "Googoosh - Talagh"
+    assert "ytsearch1:googoosh talagh" in calls[0]
+
+
+def test_resolve_keeps_a_url_and_fetches_its_title(monkeypatch):
+    monkeypatch.setattr(video, "_run", lambda args, timeout=None: "Talagh")
+    url, title = video.resolve("https://youtu.be/abc123")
+    assert url == "https://youtu.be/abc123"
+    assert title == "Talagh"
+
+
+def test_resolve_plays_a_url_even_if_the_title_lookup_fails(monkeypatch):
+    def boom(args, timeout=None):
+        raise video.VideoError("yt-dlp failed")
+
+    monkeypatch.setattr(video, "_run", boom)
+    url, title = video.resolve("https://youtu.be/abc123")
+    assert url == "https://youtu.be/abc123"
+    assert title is None
+
+
+def test_resolve_raises_when_a_search_finds_nothing(monkeypatch):
+    monkeypatch.setattr(video, "_run", lambda args, timeout=None: "")
+    with pytest.raises(video.VideoError):
+        video.resolve("asdkjhasdkjh nonsense query")
+
+
+def test_resolve_rejects_an_empty_target():
+    with pytest.raises(ValueError):
+        video.resolve("   ")
