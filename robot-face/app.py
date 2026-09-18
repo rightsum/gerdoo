@@ -25,6 +25,7 @@ from werkzeug.security import check_password_hash
 import lidar
 import face_track
 import teensy
+import video
 from camera import camera, CameraError
 import voice
 
@@ -398,6 +399,105 @@ def api_voice_status():
                     "detail": st.get("voice_detail", ""),
                     "enabled": voice_enabled(),
                     "language": stt_language()})
+
+
+# ---- Video ----
+# The agent runs on another machine, so local_only() cannot be the gate here.
+# A shared token opens these routes and ONLY these routes; everything else keeps
+# session login. The token lives in config.json, which is gitignored.
+def video_guard():
+    """None to proceed, or a response to abort with."""
+    token = load_config().get("video_token", "")
+    sent = request.headers.get("X-Video-Token", "")
+    if token and sent and sent == token:
+        return None
+    if logged_in() or local_only():
+        return None
+    app.logger.warning("video: rejected request from %s", request.remote_addr)
+    return jsonify(error="forbidden"), 403
+
+
+def _pending():
+    return load_state().get("video_pending")
+
+
+def _set_pending(record):
+    s = load_state()
+    s["video_pending"] = record
+    s["updated"] = time.time()
+    save_state(s)
+
+
+@app.route("/api/video/play", methods=["POST"])
+def api_video_play():
+    guard = video_guard()
+    if guard:
+        return guard
+    data = request.get_json(force=True, silent=True) or {}
+    target = (data.get("url_or_query") or "").strip()
+    if not target:
+        return jsonify(error="nothing to play"), 400
+    try:
+        url, title = video.resolve(target)
+        start = video.parse_start(data.get("start"), url=url)
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+    except video.VideoError as e:
+        return jsonify(error=str(e)), 400
+
+    # Deferral is a rule, not a parameter: anything asked for during a call
+    # starts when the call ends. One record serves both this and a video
+    # interrupted BY a call, so the two can never both fire.
+    if load_state().get("voice", "idle") != "idle":
+        _set_pending({"url": url, "title": title, "start": start or 0})
+        return jsonify(ok=True, title=title, deferred=True)
+
+    try:
+        video.play_url(url, start=start)
+    except video.VideoError as e:
+        return jsonify(error=str(e)), 503
+    _set_pending(None)
+    return jsonify(ok=True, title=title, deferred=False)
+
+
+@app.route("/api/video/stop", methods=["POST"])
+def api_video_stop():
+    guard = video_guard()
+    if guard:
+        return guard
+    _set_pending(None)
+    try:
+        video.stop()
+    except video.VideoError as e:
+        return jsonify(error=str(e)), 503
+    return jsonify(ok=True)
+
+
+@app.route("/api/video/<action>", methods=["POST"])
+def api_video_pause_resume(action):
+    guard = video_guard()
+    if guard:
+        return guard
+    if action not in ("pause", "resume"):
+        return jsonify(error="unknown action"), 400
+    try:
+        getattr(video, action)()
+    except video.VideoError as e:
+        return jsonify(error=str(e)), 503
+    return jsonify(ok=True)
+
+
+@app.route("/api/video/status")
+def api_video_status():
+    guard = video_guard()
+    if guard:
+        return guard
+    try:
+        st = video.status()
+    except video.VideoError as e:
+        return jsonify(error=str(e), playing=False, deferred=bool(_pending())), 503
+    st["deferred"] = bool(_pending())
+    return jsonify(st)
 
 
 # ---- Auth ----
