@@ -32,6 +32,7 @@ if ! pactl list short sources 2>/dev/null | grep -q "[[:space:]]$MIC_SOURCE[[:sp
     [ -x "$SETUP" ] && "$SETUP" >/dev/null 2>&1
     if pactl list short sources 2>/dev/null | grep -q "[[:space:]]$MIC_SOURCE[[:space:]]"; then
         note "$MIC_SOURCE rebuilt"
+        REBUILT=1
     else
         note "$MIC_SOURCE could NOT be rebuilt — is the board enumerated?"
         exit 0
