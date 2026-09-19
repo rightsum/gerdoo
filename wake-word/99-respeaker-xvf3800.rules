@@ -16,3 +16,17 @@
 # uaccess covers the user logged in at the seat, which is how the robot runs its
 # kiosk; the plugdev group is the fallback for a headless login over ssh.
 SUBSYSTEM=="usb", ATTRS{idVendor}=="2886", ATTRS{idProduct}=="001e", TAG+="uaccess", GROUP="plugdev", MODE="0660"
+
+# When the board appears, ask the user's systemd to rebuild the microphone.
+#
+# The board re-enumerates on its own — four times in one afternoon — and each
+# time PulseAudio destroys the remapped `gerdoo_mic` source. The wake-word
+# detector then silently reattaches to the RAW six-channel input, whose downmix
+# is far too quiet to recognise, and the robot stops answering to its name with
+# every service still reporting healthy.
+#
+# udev runs as root and cannot reach the user's PulseAudio, so it cannot fix this
+# itself; SYSTEMD_USER_WANTS hands the job to the session that can. A timer runs
+# the same service every 30s, because the source has also vanished with no USB
+# event at all.
+ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="2886", ATTRS{idProduct}=="001e", TAG+="systemd", ENV{SYSTEMD_USER_WANTS}+="gerdoo-audio-repair.service"
