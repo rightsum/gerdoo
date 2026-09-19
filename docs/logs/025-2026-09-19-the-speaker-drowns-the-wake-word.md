@@ -139,6 +139,38 @@ browser and are wrong here:
 - **Both play and pause icons drew at once.** `hidden` on an inline-SVG child
   does not hide it. One path whose `d` is swapped, instead of two overlaid SVGs.
 
+## The button broke calls before it fixed them
+
+Minutes after deploying, every trigger failed with "can't connect". The server
+was healthy the whole time — agent up, HTTP 200 from the robot in 11 ms, the
+WebSocket endpoint correctly returning 401 without a token. The fault was the
+new button.
+
+```
+22:54:30  connected; enabling mic
+22:54:30  joinVoice FAILED: room is null
+22:54:36  joinVoice FAILED: room.connect timed out after 15000ms   <- began 22:54:21
+```
+
+The second connect started *before* the first finished: **two `joinVoice()`
+calls running concurrently over one shared `room`.** The button calls
+`joinVoice()` directly, which POSTs `/api/voice/wake`, which sets the server to
+`connecting`, which arrives over SSE, which makes `apply()` call `joinVoice()`
+again. The existing `if (room) return` guard cannot catch it, because `room` is
+only assigned *after* the token fetch resolves — both callers sail past it.
+
+Fixed with a `joining` flag set before the fetch and cleared in a `finally`, plus
+a condition on the failure path's `setTimeout(report('idle'), 5000)` so a stale
+timer from a failed attempt cannot drag the *next* live call back to idle.
+
+Verified: `join already in flight; ignoring` → `mic enabled` → `listening`, and
+a second tap ends the call.
+
+**The lesson is about adding a caller, not about the bug.** The wake word had
+been the only thing that started a session, so a guard that assumed one caller
+had held for months. The button did not change any of that code — it just became
+the second caller, and that was enough.
+
 ## Dead end: the toolbar cannot be reached during video
 
 The design was for the toolbar to stay visible while a video plays — the case

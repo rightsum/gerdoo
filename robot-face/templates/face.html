@@ -237,8 +237,21 @@
       } catch (e) { console.warn('voice state report failed:', e); }
     }
 
+    // Re-entrancy guard. `room` is only assigned AFTER the token fetch, so the
+    // `if (room)` check below cannot stop a second call that arrives while the
+    // first is still awaiting — and two of them share this one `room`, so the
+    // later overwrites the earlier and both fail in confusing ways ("room is
+    // null", then a 15s connect timeout from the abandoned attempt).
+    //
+    // Two callers can now race: the wake word (server sets `connecting`, SSE
+    // wakes apply(), apply calls this) and the Wake button (calls this
+    // directly, which POSTs /api/voice/wake, which sets `connecting`, which
+    // comes back over SSE and calls this AGAIN).
+    let joining = false;
+
     async function joinVoice() {
-      jslog(`joinVoice called; room=${room ? 'present' : 'null'}`);
+      jslog(`joinVoice called; room=${room ? 'present' : 'null'} joining=${joining}`);
+      if (joining) { jslog('join already in flight; ignoring'); return; }
       if (room) {
         // Already in a session. Something re-set the state to `connecting`;
         // correct it rather than returning and leaving the face frozen there.
@@ -246,6 +259,7 @@
         report('listening');
         return;
       }
+      joining = true;
       try {
         const res = await fetch('/api/voice/wake', { method: 'POST' });
         const { url, token } = await res.json();
@@ -313,7 +327,13 @@
         room = null;
         jslog(`joinVoice FAILED: ${(e && e.message) || e}`);
         report('error', String((e && e.message) || e));
-        setTimeout(() => report('idle'), 5000);
+        // Only clear to idle if nothing has started since. Without this check a
+        // stale timer from a failed attempt lands during the NEXT session and
+        // drags a live call back to idle, which makes apply() call leaveVoice()
+        // and null `room` mid-connect.
+        setTimeout(() => { if (!room && !joining) report('idle'); }, 5000);
+      } finally {
+        joining = false;
       }
     }
 
