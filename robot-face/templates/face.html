@@ -390,6 +390,12 @@
       catch (e) { jslog(`toolbar ${path} failed: ${(e && e.message) || e}`); }
     }
 
+    // Nothing here touches the video. The server already yields it to a call and
+    // replays it afterwards — _video_yield_to_call / _video_resume_after_call in
+    // app.py, on every voice state change, whoever caused it. It STOPS rather
+    // than pauses, deliberately: a paused mpv leaves its window on screen with a
+    // frozen frame over the face. An earlier version of this handler paused the
+    // video here as well and the two mechanisms fought each other.
     tbCall.addEventListener('click', () => {
       jslog(`toolbar tapped; lastVoice=${lastVoice}`);
       if (lastVoice === 'idle') {

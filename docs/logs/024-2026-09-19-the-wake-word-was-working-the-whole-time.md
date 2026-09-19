@@ -31,11 +31,28 @@ stopped listening on purpose.**
 for the LiveKit call. Shouts 2 through 5 arrived during that window and were never
 heard by anything.
 
-The owner could not tell a session had started, because **the music kept playing
-through it.** `wake_word.py` only stopped a video for the `stop` action
-(`گردو بسه`); on a `call` it left playback running. So the chime, the agent's
-greeting and the whole conversation came out of the same speaker as Linkin Park,
-underneath it. The robot woke, answered, and was drowned out.
+The owner could not tell a session had started — the chime and the agent's
+greeting went unnoticed while the music was loud, and the detector was deaf to
+every further shout.
+
+> **Correction, same evening.** This entry originally claimed the music kept
+> playing through the call, and added a pause/resume to `wake_word.py` to fix
+> it. **That was wrong and the change has been reverted.** The server already
+> yields the video to a call and replays it afterwards —
+> `_video_yield_to_call()` / `_video_resume_after_call()` in `app.py`, on every
+> voice state change, whoever caused it. Measured directly, with nothing else
+> involved:
+>
+> ```
+> before call: playing=true   deferred=false
+> during call: playing=false  deferred=true    <- stopped, position recorded
+> after call:  playing=true   position=12      <- replayed
+> ```
+>
+> It **stops** rather than pauses, deliberately: a paused mpv leaves its window
+> on screen with a frozen frame over the face. The claim was an assumption read
+> off `wake_word.py` — which only handles the `stop` phrase — without checking
+> whether anything else already did the job. It did. See log 025.
 
 ## Evidence
 
@@ -167,8 +184,11 @@ SYSTEMD_USER_WANTS=gerdoo-audio-repair.service
 - **A component that goes deliberately deaf must say so where the owner can hear
   it.** "Detector paused" was printed to a journal nobody was reading, while the
   robot sat there looking like it had ignored ten shouts.
-- **An action that seizes the speaker must first quiet whatever else owns it.**
-  The `stop` phrase had this right; `call` never did.
+- **Check whether the behaviour already exists before adding it.** The pause
+  this entry originally added was real work, carefully guarded, and completely
+  redundant: `app.py` had done it for months, in a better way, three functions
+  from the code being read. Grepping for the symptom would have found it;
+  grepping for the file being edited did not.
 - **Check the product ID before trusting a vendor tool's silence.** "No device
   found" meant the wrong product's repo, not a permissions problem, and it
   invalidated a follow-up that had been sitting open since log 018.

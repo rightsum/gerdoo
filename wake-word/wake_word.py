@@ -152,33 +152,6 @@ def stop_video(base_url, timeout=5.0):
         return False
 
 
-def video_snapshot(base_url, timeout=3.0):
-    """
-    (playing, paused) for the robot's screen. (False, False) if unreachable.
-
-    Both flags matter: a video the owner had already paused must be left alone,
-    so "playing" is not enough to decide whether to resume one later.
-    """
-    try:
-        with urllib.request.urlopen(f"{base_url}/api/video/status",
-                                    timeout=timeout) as r:
-            st = json.loads(r.read())
-            return bool(st.get("playing")), bool(st.get("paused"))
-    except Exception:
-        return False, False
-
-
-def video_action(base_url, action, timeout=5.0):
-    """POST /api/video/pause or /resume. True if the robot accepted it."""
-    req = urllib.request.Request(f"{base_url}/api/video/{action}", method="POST")
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return r.status == 200
-    except Exception as e:
-        print(f"  video {action} failed: {e}", file=sys.stderr)
-        return False
-
-
 def voice_state(base_url, timeout=3.0):
     """Current voice state, or None if Flask could not be reached."""
     try:
@@ -543,74 +516,44 @@ def main():
                     last_fire = time.time()
                     continue
 
-                # A call takes over the speaker — first the chime, then the
-                # agent's voice — and a playing video is already using that
-                # same speaker. Started over one, the entire conversation is
-                # inaudible underneath it. See log 024: half a minute of
-                # someone shouting at a robot that had already woken, answered,
-                # and been drowned out by the music it was still playing.
-                #
-                # Paused BEFORE the chime, so the chime is audible too. Only a
-                # video this code paused is resumed afterwards — one the owner
-                # had already paused stays paused.
-                resume_video = False
-                if args.voice_url:
-                    playing, paused = video_snapshot(args.voice_url)
-                    if playing and not paused:
-                        resume_video = video_action(args.voice_url, "pause")
-                        if resume_video:
-                            print("  video paused for the call", flush=True)
-                            if logfh:
-                                logfh.write("  video paused for the call\n")
-
                 # No waiting for the chime to finish: it plays through the
                 # XVF3800, whose hardware AEC removes it from the microphone.
                 play(args.sound)
                 rec.Reset()
 
                 if args.voice_url:
-                    try:
-                        already = voice_state(args.voice_url)
-                        if already not in (None, "idle"):
-                            print(f"  session already active ({already}); not re-triggering",
-                                  flush=True)
-                            if logfh:
-                                logfh.write(f"  session already active ({already}); "
-                                            f"not re-triggering\n")
-                            close_mic(stream)
-                            wait_for_session_end(args.voice_url)
-                            stream = open_mic()
-                            with q.mutex:
-                                q.queue.clear()
-                            rec.Reset()
-                            last_fire = time.time()
-                        elif start_voice_session(args.voice_url):
-                            print("  session started; mic released, detector paused",
-                                  flush=True)
-                            if logfh:
-                                logfh.write("  session started; mic released\n")
-                            close_mic(stream)
-                            wait_for_session_end(args.voice_url)
-                            stream = open_mic()
-                            print("  session ended; mic reacquired, listening again",
-                                  flush=True)
-                            if logfh:
-                                logfh.write("  session ended; listening again\n")
-                            # Audio queued during the conversation is stale and
-                            # would be decoded as if it had just been spoken.
-                            with q.mutex:
-                                q.queue.clear()
-                            rec.Reset()
-                            last_fire = time.time()
-                    finally:
-                        # Whatever happened to the session — started, refused,
-                        # already running, or raised — the video must come back.
-                        # A stranded pause leaves the robot silently holding
-                        # someone's film hostage.
-                        if resume_video and video_action(args.voice_url, "resume"):
-                            print("  video resumed", flush=True)
-                            if logfh:
-                                logfh.write("  video resumed\n")
+                    already = voice_state(args.voice_url)
+                    if already not in (None, "idle"):
+                        print(f"  session already active ({already}); not re-triggering",
+                              flush=True)
+                        if logfh:
+                            logfh.write(f"  session already active ({already}); "
+                                        f"not re-triggering\n")
+                        close_mic(stream)
+                        wait_for_session_end(args.voice_url)
+                        stream = open_mic()
+                        with q.mutex:
+                            q.queue.clear()
+                        rec.Reset()
+                        last_fire = time.time()
+                    elif start_voice_session(args.voice_url):
+                        print("  session started; mic released, detector paused",
+                              flush=True)
+                        if logfh:
+                            logfh.write("  session started; mic released\n")
+                        close_mic(stream)
+                        wait_for_session_end(args.voice_url)
+                        stream = open_mic()
+                        print("  session ended; mic reacquired, listening again",
+                              flush=True)
+                        if logfh:
+                            logfh.write("  session ended; listening again\n")
+                        # Audio queued during the conversation is stale and
+                        # would be decoded as if it had just been spoken.
+                        with q.mutex:
+                            q.queue.clear()
+                        rec.Reset()
+                        last_fire = time.time()
     finally:
         try:
             stream.stop()

@@ -9,16 +9,25 @@ Environment=DISPLAY=:0
 # Idle with no window: the kiosk face stays visible until loadfile is sent, and
 # stop takes the window away again.
 #
-# --fullscreen applies to the window when it does appear, so a video always
-# covers the face.
+# NOT --fullscreen. The bottom strip of the screen belongs to the kiosk page's
+# toolbar, which is the only way to start a call while something is playing —
+# the wake word cannot be heard over the robot's own speaker at volume (log
+# 025). A fullscreen video hides that toolbar exactly when it is needed.
 #
-# An attempt to size this to the screen MINUS the toolbar strip (so the toolbar
-# stays reachable during playback) was reverted: xfwm4 puts the kiosk browser's
-# _NET_WM_STATE_FULLSCREEN above mpv's _NET_WM_STATE_ABOVE, so the face covered
-# the video entirely. Reserving the strip requires the browser to stop being
-# fullscreen as well — see the follow-up in docs/logs.
+# 1920x1080 is the rotated desktop (the panel is physically 1080x1920, turned by
+# rotate-display.sh). The 190px difference is #toolbar's height in face.html,
+# which is set by the Wake button: 156px is about 9mm on this 440 PPI panel,
+# roughly an Android 48dp touch target, and a smaller button cannot be hit.
+#
+# The strip only costs anything while a video plays — mpv has no window at all
+# otherwise, so the idle face keeps the whole screen.
+#
+# --ontop is load-bearing, and so is the browser NOT being fullscreen: xfwm4
+# stacks _NET_WM_STATE_FULLSCREEN above _NET_WM_STATE_ABOVE, so while the kiosk
+# ran with --kiosk the face covered the video entirely. The browser is launched
+# maximized-and-undecorated instead; see firefox-userChrome.css.
 ExecStart=/usr/bin/mpv --idle=yes --force-window=no \
-    --fullscreen \
+    --geometry=1920x890+0+0 --no-border --ontop \
     --input-ipc-server=%t/gerdoo-mpv.sock \
     --script-opts=ytdl_hook-ytdl_path=%h/.local/bin/yt-dlp \
     --ytdl-format=bestvideo[height<=1080]+bestaudio/best \

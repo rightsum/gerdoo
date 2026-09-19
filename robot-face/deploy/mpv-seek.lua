@@ -63,9 +63,14 @@ end
 
 mp.add_forced_key_binding("MBTN_LEFT_DBL", "gerdoo-seek", seek_from_tap)
 
--- The unit's --fullscreen does not stick, because the window is created lazily
--- when a file loads rather than at start. Setting it per file is what actually
--- covers the kiosk face.
+-- The unit's window flags do not stick, because the window is created lazily
+-- when a file loads rather than at start. Fullscreen in particular has to be
+-- cleared per file, or an earlier session's state carries over.
+--
+-- Deliberately NOT fullscreen: the bottom strip belongs to the kiosk toolbar.
+-- The SIZE comes from --geometry in video-player.service, not from here —
+-- display-width/display-height are nil at file-loaded, because the window does
+-- not exist yet.
 mp.register_event("file-loaded", function()
-    mp.set_property_bool("fullscreen", true)
+    mp.set_property_bool("fullscreen", false)
 end)

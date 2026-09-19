@@ -171,14 +171,13 @@ been the only thing that started a session, so a guard that assumed one caller
 had held for months. The button did not change any of that code — it just became
 the second caller, and that was enough.
 
-## Dead end: the toolbar cannot be reached during video
+## Getting the toolbar over the video: a fight with the window manager
 
-The design was for the toolbar to stay visible while a video plays — the case
-that matters most, since that is when shouting fails. It does not work, and the
-reason is the window manager.
+The button is worthless on the face alone — the case it exists for is a playing
+video, which is when shouting fails. That took three goes.
 
 The video is native `mpv`, not in the browser. Sizing it to the screen minus a
-64 px strip does work (`--geometry=1920x1016+0+0`, verified). But:
+strip works (`--geometry=1920x890+0+0 --no-border --ontop`). But:
 
 ```
 mpv      _NET_WM_STATE_ABOVE
@@ -186,17 +185,59 @@ firefox  _NET_WM_STATE_FULLSCREEN
 stacking bottom→top:  mpv, firefox
 ```
 
-**xfwm4 stacks the fullscreen kiosk browser above `_NET_WM_STATE_ABOVE`**, so the
-face covered the video entirely. `--ontop` does not beat fullscreen, and
-`--kiosk` re-asserts fullscreen after it is stripped. Reverted `mpv` to
-`--fullscreen`; the comment in `video-player.service` records why.
+**xfwm4 stacks fullscreen above `_NET_WM_STATE_ABOVE`**, so the face covered the
+video entirely. `--ontop` does not beat fullscreen; `xdotool windowstate --remove
+FULLSCREEN` does not stick because `--kiosk` re-asserts it.
 
-Making it work requires **the browser to stop being fullscreen too** — dropping
-`--kiosk` for an undecorated 1920x1080 window with chrome hidden via
-`userChrome.css`. Not attempted: if it misbehaves, the robot boots to a broken
-screen.
+**The browser had to stop being fullscreen.** `--kiosk` is what sets that state,
+so it is gone, replaced by:
 
-So today the Wake button helps on the face, not over music.
+- `chrome/userChrome.css` in the profile, hiding `#TabsToolbar`, `#nav-bar` and
+  the rest — with `toolkit.legacyUserProfileCustomizations.stylesheets` in
+  `user.js`, or the file is ignored silently.
+- `deploy/start-kiosk.sh`, which launches the browser, waits for its window, sets
+  `_MOTIF_WM_HINTS` to drop decorations, **remaps it** so the hint takes effect,
+  then sizes it to the screen. Firefox accepts no geometry flag on X11, so this
+  has to happen after mapping.
+
+A maximized, undecorated window sits in the WM's normal layer, and mpv's `ABOVE`
+finally wins.
+
+**`plank` had to go too.** The dock floats above the browser and sits exactly
+where the Wake button is, ready to swallow every tap meant for it.
+`start-kiosk.sh` kills it.
+
+The strip is **190px** — set by the button, not by taste: 156px is about 9mm on
+this 440 PPI panel, and a smaller target cannot be hit. It costs nothing while
+idle, because mpv has no window at all then.
+
+Verified over a playing video, single tap, no wake word involved:
+
+```
+mpv window: 1920x890
+before: voice=idle       video paused=false
+tap  →  voice=listening  (connected, mic enabled)
+tap  →  voice=idle
+```
+
+## The video pause that was already there
+
+Both this entry's button and log 024's change to `wake_word.py` added code to
+quiet a playing video for the duration of a call. **Both were redundant and both
+were reverted.**
+
+`app.py` has done it for months, on every voice state change, whoever caused it:
+
+```
+before call: playing=true   deferred=false
+during call: playing=false  deferred=true    <- _video_yield_to_call()
+after call:  playing=true   position=12      <- _video_resume_after_call()
+```
+
+Measured with the toolbar and the detector entirely out of the picture, by
+setting voice state directly. And the existing implementation is the better one —
+it **stops** rather than pauses, because a paused mpv leaves its window on screen
+with a frozen frame over the face. Log 024 has been corrected.
 
 ## Log 023 recurred, and the touch path is unverified because of it
 
@@ -232,6 +273,10 @@ logic is verified end to end — tap → `joinVoice` → "mic enabled" → `list
   with what it is cancelling. Buying one does not buy a quiet room.
 - **A synthetic input is not a test of an input path.** XTEST proved the handler,
   and proved nothing about the touchscreen — which turned out not to exist.
+- **Grep for the behaviour, not for the file you are editing.** Two separate
+  video-pause implementations were written and reverted in one evening because
+  nobody looked for the one `app.py` already had, three functions from code that
+  was being read closely.
 - **Check the product ID before believing a vendor tool's silence.** "No device
   found" meant the wrong product's repo, and it had silently invalidated a
   follow-up open since log 018.

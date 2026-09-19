@@ -34,3 +34,12 @@ user_pref("browser.tabs.warnOnClose", false);
 user_pref("full-screen-api.warning.timeout", 0);            // no "full screen" toast
 user_pref("browser.warnOnQuit", false);
 user_pref("signon.rememberSignons", false);                 // don't offer to save the control-panel password
+
+// ---- Chrome removal without --kiosk (see firefox-userChrome.css) ----
+// --kiosk forces _NET_WM_STATE_FULLSCREEN, and xfwm4 stacks that above mpv's
+// _NET_WM_STATE_ABOVE — so a video player sized to leave room for the toolbar
+// ended up BEHIND the face. Dropping --kiosk for a maximized undecorated window
+// keeps the browser in the normal layer, where mpv can float over it. See
+// log 025.
+user_pref("toolkit.legacyUserProfileCustomizations.stylesheets", true);
+user_pref("browser.tabs.inTitlebar", 0);
