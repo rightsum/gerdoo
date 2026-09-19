@@ -34,6 +34,7 @@ NNN-YYYY-MM-DD-short-title.md
 | [018](018-2026-09-15-xvf3800-hardware-aec.md) | 2026-09-15 | reSpeaker XVF3800 becomes the robot's mic and speaker — hardware echo cancellation, every software echo workaround removed, a hidden -20 dB volume control | ✅ Deployed · 🔄 Barge-in and wake-word range to re-test |
 | [019](019-2026-09-18-video-playback.md) | 2026-09-18 | YouTube video playback on the kiosk screen — mpv + yt-dlp over JSON IPC, a call takes the screen and video resumes after, a Persian stop phrase | ✅ Deployed — see 020 |
 | [020](020-2026-09-18-video-playback-deployed.md) | 2026-09-18 | Deploying it: the search that answered early and exited late, a microphone source that vanished silently, an agent answering before the question ended — and six wrong theories about a deaf microphone | ✅ Playback working · ⏳ Wake word during loud playback unresolved |
+| [021](021-2026-09-19-kiosk-page-took-the-robot-down.md) | 2026-09-19 | The kiosk page took the robot down twice — a `fetch` whose rejection was logged by fetching again, 1019 threads, 1024 descriptors and an accept storm | ✅ Fixed and deployed · 🔄 Watching for recurrence |
 
 Entries are either **problems** (001, 003) or **design decision records** (002). Both belong here — a decision you cannot reconstruct the reasoning for is as expensive as a bug you cannot reproduce.
 

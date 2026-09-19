@@ -51,13 +51,37 @@
   <script>
     // Breadcrumbs to the server. A kiosk has no console, so anything that goes
     // wrong here is otherwise invisible.
+    // Breadcrumbs to the server, and the three guards that keep them from
+    // becoming a denial of service against it.
+    //
+    // This took the robot down twice. fetch() rejects ASYNCHRONOUSLY, so the
+    // try/catch that used to wrap it caught nothing: a failed log became an
+    // unhandled rejection, onunhandledrejection called jslog, and that fetched
+    // again. Every failure manufactured another failure. The moment the server
+    // slowed, this page attacked it — connections piling into CLOSE-WAIT until
+    // it ran out of file descriptors at 1024 and stopped accepting entirely.
+    //
+    //   .catch      a failed log can never become an unhandled rejection
+    //   busy        a log raised while logging cannot re-enter
+    //   failures    after a few consecutive failures, stop until one succeeds,
+    //               so an unreachable server is never hammered by its own
+    //               error reports
+    let jslogBusy = false;
+    let jslogFailures = 0;
     function jslog(msg) {
+      if (jslogBusy || jslogFailures >= 3) return;
+      jslogBusy = true;
       try {
         fetch('/api/voice/log', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ msg: String(msg).slice(0, 400) }),
-        });
-      } catch {}
+        }).then(() => { jslogFailures = 0; })
+          .catch(() => { jslogFailures += 1; });
+      } catch {
+        jslogFailures += 1;
+      } finally {
+        jslogBusy = false;
+      }
     }
     window.onerror = (m, src, line, col) => jslog(`JS ERROR ${m} @${line}:${col}`);
     window.onunhandledrejection = (e) => jslog(`UNHANDLED ${e.reason && e.reason.message || e.reason}`);
