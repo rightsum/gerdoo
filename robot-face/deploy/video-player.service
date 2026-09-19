@@ -7,9 +7,18 @@ Wants=robot-face.service
 Type=simple
 Environment=DISPLAY=:0
 # Idle with no window: the kiosk face stays visible until loadfile is sent, and
-# stop takes the window away again. --fullscreen applies to the window when it
-# does appear, so a video always covers the face.
-ExecStart=/usr/bin/mpv --idle=yes --force-window=no --fullscreen \
+# stop takes the window away again.
+#
+# --fullscreen applies to the window when it does appear, so a video always
+# covers the face.
+#
+# An attempt to size this to the screen MINUS the toolbar strip (so the toolbar
+# stays reachable during playback) was reverted: xfwm4 puts the kiosk browser's
+# _NET_WM_STATE_FULLSCREEN above mpv's _NET_WM_STATE_ABOVE, so the face covered
+# the video entirely. Reserving the strip requires the browser to stop being
+# fullscreen as well — see the follow-up in docs/logs.
+ExecStart=/usr/bin/mpv --idle=yes --force-window=no \
+    --fullscreen \
     --input-ipc-server=%t/gerdoo-mpv.sock \
     --script-opts=ytdl_hook-ytdl_path=%h/.local/bin/yt-dlp \
     --ytdl-format=bestvideo[height<=1080]+bestaudio/best \

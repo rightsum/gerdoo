@@ -10,6 +10,16 @@
     /* Kiosk: no cursor, no text selection, no touch callouts. */
     * { cursor: none; -webkit-user-select: none; user-select: none;
       -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
+    /* The toolbar owns the bottom strip of the screen in BOTH modes. mpv is
+       sized to the screen minus this height (--geometry in
+       video-player.service), so a playing video never covers it. Change this
+       and you must change that geometry too. */
+    /* The panel is 1920x1080 on a FIVE INCH diagonal — about 440 PPI, roughly
+       2.75x a normal desktop screen. CSS pixels here are device pixels
+       (devicePixelRatio is 1), so anything sized by eye for a laptop comes out
+       physically tiny: a 76px control is 4mm across and cannot be hit.
+       Everything below is sized in physical terms instead —
+       160px is a little over 9mm, about an Android 48dp touch target. */
     #face { position: fixed; inset: 0; }
     robot-face { position: absolute; inset: 0; }
     @keyframes voicePulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
@@ -18,7 +28,7 @@
        words what the robot is doing, which matters most for "thinking" —
        a colour alone does not distinguish it from waiting. */
     #voice-caption {
-      position: fixed; left: 0; right: 0; bottom: 6vh;
+      position: fixed; left: 0; right: 0; bottom: 30vh;
       text-align: center; pointer-events: none;
       font: 500 3.2vh/1.3 ui-sans-serif, system-ui, sans-serif;
       letter-spacing: 0.04em; color: #ffffff; opacity: 0;
@@ -26,6 +36,61 @@
       transition: opacity 0.35s ease;
     }
     #voice-caption.show { opacity: 0.85; }
+
+    /* ---- Toolbar ---------------------------------------------------------
+       Always present, in both face and video mode. It exists because the wake
+       word cannot be heard over the robot's own speaker at volume, so touch is
+       the only reliable way to start a call while something is playing. */
+    /* Floating, not a bar. No background and no reserved strip, so the face
+       and any video keep the whole screen; only the controls themselves take
+       pixels. pointer-events:none lets every tap that misses a button fall
+       through to what is underneath. */
+    #toolbar {
+      position: fixed; left: 0; right: 0; bottom: 0; height: 190px;
+      display: flex; align-items: center; gap: 22px;
+      padding: 0 26px; box-sizing: border-box;
+      background: none; border: 0; pointer-events: none;
+    }
+    #toolbar button { pointer-events: auto; }
+    #toolbar button {
+      appearance: none; border: 1px solid rgba(255,255,255,0.22); border-radius: 10px;
+      background: rgba(18,16,14,0.55); backdrop-filter: blur(6px); color: #f2ede6;
+      min-width: 130px; height: 118px; padding: 0 26px;
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      font: 600 34px/1 ui-sans-serif, system-ui, sans-serif;
+      border-radius: 22px;
+    }
+
+    /* The wake button is a FAB: circular, centred, and raised so it breaks the
+       top edge of the bar. It is the one control someone reaches for in a
+       hurry — when the robot is playing something loud and shouting at it does
+       not work — so it is findable without looking, unlike the media buttons
+       beside it. Centred rather than left, because the screen is reachable
+       from either side. */
+    #toolbar button#tb-call {
+      position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%);
+      width: 156px; height: 156px; min-width: 0; padding: 0;
+      border-radius: 50%; flex-direction: column; gap: 6px;
+      background: #1f6f4a; border: 1px solid #2f9668; color: #ffffff;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+    }
+    /* The word is the whole button now, so it carries the size. */
+    #tb-call-label { font: 700 40px/1 ui-sans-serif, system-ui, sans-serif;
+                     letter-spacing: 0.01em; }
+    #toolbar button#tb-call:active { background: #2a8d5f; border-color: #46c08c; }
+    /* In a call the same button ends it — red, so the two are never confused. */
+    #toolbar button#tb-call.in-call { background: #7a2020; border-color: #a83c3c; }
+    #toolbar button#tb-call.in-call:active { background: #9a2b2b; border-color: #c65656; }
+    /* The kiosk sets -webkit-tap-highlight-color: transparent globally, so a
+       touch produces NO feedback at all unless it is put back by hand. Without
+       this the toolbar feels broken even when it works. */
+    #toolbar button:active { background: rgba(90,82,70,0.75); border-color: rgba(255,255,255,0.45); }
+    /* `display: inline-flex` above is an author rule and so beats the UA
+       stylesheet's `[hidden] { display: none }`. Without this the media
+       buttons stay on screen with nothing playing. */
+    #toolbar button[hidden] { display: none; }
+    #toolbar button svg { width: 54px; height: 54px; fill: currentColor; }
+    #tb-spacer { flex: 1; }
   </style>
 </head>
 <body>
@@ -34,6 +99,19 @@
       color="{{ state.color or '#FFAE1E' }}"
       emotion="{{ state.mood or 'auto' }}"
       speed="1"></robot-face>
+  </div>
+
+  <div id="toolbar">
+    <button id="tb-call" type="button" aria-label="Start a call">
+      <span id="tb-call-label">Wake!</span>
+    </button>
+    <button id="tb-playpause" type="button" aria-label="Pause or resume" hidden>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path id="tb-icon-path" d="M8 5h3v14H8zm5 0h3v14h-3z"/></svg>
+    </button>
+    <button id="tb-stop" type="button" aria-label="Stop playback" hidden>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6h12v12H6z"/></svg>
+    </button>
+    <span id="tb-spacer"></span>
   </div>
 
   <div id="voice-caption"></div>
@@ -137,6 +215,7 @@
         lastVoice = v;
         if (v === 'connecting') joinVoice();
         if (v === 'idle') leaveVoice();
+        try { paintCall(); } catch (e) { jslog(`paintCall: ${(e && e.message) || e}`); }
       }
     }
 
@@ -266,6 +345,84 @@
       try { apply(await (await fetch('/api/state', { cache: 'no-store' })).json()); }
       catch (e) { jslog(`poll apply() threw: ${(e && e.message) || e}`); }
     }, 30000);
+
+    // ---- Toolbar -------------------------------------------------------
+    // Touch is the only reliable way to start a call while something is
+    // playing: at volume the robot's own speaker masks the wake word at the
+    // microphone, so shouting does not work (log 025).
+    jslog('G: wiring toolbar');
+    const tbCall  = document.getElementById('tb-call');
+    const tbLabel = document.getElementById('tb-call-label');
+    const tbPP    = document.getElementById('tb-playpause');
+    const tbStop  = document.getElementById('tb-stop');
+    const tbIconPath  = document.getElementById('tb-icon-path');
+    // One icon, two shapes. Two overlaid <svg>s toggled with `hidden` did not
+    // work: `hidden` on an inline-SVG child does not hide it the way it does on
+    // an HTML element, so both shapes drew at once.
+    const ICON_PAUSE = 'M8 5h3v14H8zm5 0h3v14h-3z';
+    const ICON_PLAY  = 'M8 5l11 7-11 7z';
+
+    // Every handler swallows its own failure. A toolbar that throws must not
+    // become a source of unhandled rejections — that is what took the robot
+    // down twice (log 021).
+    async function post(path) {
+      try { await fetch(path, { method: 'POST', cache: 'no-store' }); }
+      catch (e) { jslog(`toolbar ${path} failed: ${(e && e.message) || e}`); }
+    }
+
+    tbCall.addEventListener('click', () => {
+      jslog(`toolbar tapped; lastVoice=${lastVoice}`);
+      if (lastVoice === 'idle') {
+        jslog('toolbar: call');
+        joinVoice();                 // POSTs /api/voice/wake and joins
+      } else {
+        jslog('toolbar: end call');
+        report('idle');              // server broadcasts; apply() leaves
+        leaveVoice();                // and directly, in case SSE is down
+      }
+    });
+
+    tbPP.addEventListener('click', () => post(videoPaused ? '/api/video/resume'
+                                                         : '/api/video/pause'));
+    tbStop.addEventListener('click', () => post('/api/video/stop'));
+
+    // Call becomes End for the duration of a session. Driven from the same
+    // `lastVoice` the face uses, so the two can never disagree.
+    let shownVoice = null;
+    function paintCall() {
+      // apply() can fire from SSE before this section has run, and `tbCall` is
+      // a const in its temporal dead zone until then. Bail rather than throw:
+      // the 2s poll repaints immediately afterwards.
+      if (typeof tbCall === 'undefined' || !tbCall) return;
+      if (lastVoice === shownVoice) return;
+      shownVoice = lastVoice;
+      const busy = lastVoice !== 'idle';
+      tbLabel.textContent = busy ? 'End' : 'Wake!';
+      tbCall.classList.toggle('in-call', busy);
+      tbCall.setAttribute('aria-label', busy ? 'End the call' : 'Start a call');
+    }
+
+    // Video liveness is in neither /api/state nor the SSE stream, so it needs
+    // its own poll. 2s: fast enough that a tap on pause looks instant, slow
+    // enough to be nothing next to the video already playing.
+    let videoPaused = false;
+    async function pollVideo() {
+      let st = null;
+      try {
+        st = await (await fetch('/api/video/status', { cache: 'no-store' })).json();
+      } catch { /* player or Flask momentarily away; leave the toolbar as-is */ }
+      if (st) {
+        const playing = !!st.playing;
+        videoPaused = !!st.paused;
+        tbPP.hidden = !playing;
+        tbStop.hidden = !playing;
+        tbIconPath.setAttribute('d', videoPaused ? ICON_PLAY : ICON_PAUSE);
+      }
+      paintCall();
+    }
+    setInterval(pollVideo, 2000);
+    pollVideo();
+    jslog(`H: toolbar wired; call=${!!tbCall} pp=${!!tbPP} stop=${!!tbStop}`);
   </script>
 </body>
 </html>
