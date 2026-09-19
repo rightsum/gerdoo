@@ -1,7 +1,18 @@
 [Unit]
 Description=micro-ROS agent — Teensy 4.1 bridge to ROS 2
-Documentation=file:///home/jarvis/gerdoo/logs/007-2026-08-04-microros-bringup.md
-After=default.target
+Documentation=https://github.com/rightsum/gerdoo/blob/main/docs/logs/007-2026-08-04-microros-bringup.md
+
+# There is deliberately no `After=default.target` here.
+#
+# A unit WantedBy=default.target is already implicitly ordered Before it, so
+# also ordering it After the same target closes a loop. Nothing complained —
+# but any OTHER service ordered After this one then inherited the cycle, and
+# systemd breaks a cycle by deleting a start job. battery-bridge.service was
+# the casualty: never started, no error, no journal entry, and the control
+# panel's battery bars sat blank for weeks.
+#
+#   default.target: Found ordering cycle on battery-bridge.service/start
+#   Job battery-bridge.service/start deleted to break ordering cycle
 
 [Service]
 Type=simple

@@ -151,6 +151,21 @@ call**. If the agent starts hearing itself, this is the first knob to lower.
 **Takeaway: a setting that a second component silently overrides is not a
 setting.** The 85% was documented, committed, and inert on half the signal path.
 
+## The volume moved to the control panel
+
+Setting the volume over ssh is not a feature. The panel now has an **Audio**
+card — a slider that reads `/api/audio` and writes it back on release.
+
+The endpoint enforces the lesson above in code, not in a comment:
+`audio.set_volume()` writes **both** playback controls, and `get_volume()`
+reports the **quieter** of the two, because that is the one actually limiting
+what you hear. A control that moved only `PCM,1` would have shown 85% while
+PulseAudio held `PCM,0` at 100% — the exact fiction this log already records.
+
+It sits at the same tier as the neck servos: a session is enough, no panel
+password required. Camera and lidar stay held higher, because a loud robot is
+recoverable and a live camera feed of someone's home is not.
+
 ## Instruments found broken while investigating
 
 Three, none of which announced themselves:
@@ -168,12 +183,47 @@ the `xhci` errors behind this whole class of fault cannot be seen at all. The
 right compromise keeps `ReadKMsg=no` and sets `kernel.dmesg_restrict=0`, so the
 ring buffer can be polled on demand without journald ingesting a flood.
 
-**3. Battery telemetry has been dead for sixteen days.** `/api/battery` returns
-500 with `NameError: name 'BATTERY_FILE' is not defined`; the constant was
-deleted on 2026-09-03 in `39905cb`, while the handler that reads it was left
-behind. `battery-bridge.service` is enabled but **inactive**, and
-`/tmp/battery_status.json` does not exist. The control panel's battery bars have
-been silently blank — `pollBattery()` swallows the error in an empty `catch {}`.
+**3. Battery telemetry has been dead for sixteen days — three independent ways
+at once.** Fixing any one of them alone would have changed nothing on screen.
+
+*The service never ran.* `battery-bridge.service` was enabled, symlinked into
+`default.target.wants` since August, and had `ActiveEnterTimestamp=n/a` — never
+started, not once, with no failure and no journal entry of its own. The system
+journal had the reason, one line at boot:
+
+```
+default.target: Found ordering cycle on battery-bridge.service/start
+Job battery-bridge.service/start deleted to break ordering cycle starting with default.target/start
+```
+
+The cycle: `battery-bridge` was ordered `After=micro-ros-agent.service`;
+`micro-ros-agent.service` declared `After=default.target` while also being
+`WantedBy=default.target`, and a unit wanted by a target is **implicitly ordered
+Before it**. So `default.target → battery-bridge → micro-ros-agent →
+default.target`, and systemd broke the loop the only way it can — by deleting a
+start job. It picked this one.
+
+*The endpoint threw even when data existed.* `/api/battery` returned 500 with
+`NameError: name 'BATTERY_FILE' is not defined`. The constant was deleted on
+2026-09-03 in `39905cb`; the handler that reads it was left behind.
+
+*The panel hid both.* `pollBattery()` wraps its fetch in an empty `catch {}`,
+so a 500 every three seconds looked exactly like no data.
+
+Started by hand, the bridge worked immediately and correctly — main battery
+**12.55 V (99%)**, Jetson **12.33 V (92%)**. The data had been there all along.
+
+The fixes: the bad `After=default.target` is gone from
+`micro-ros-agent.service`, `battery-bridge.service` is now tracked in the repo
+without the ordering edge and installed by `deploy.sh`, and `app.py` imports
+`STATUS_FILE` from the module that writes it rather than keeping its own copy of
+the path.
+
+**Takeaway: systemd resolves an ordering cycle by deleting a job, and the unit
+it deletes is not told.** `is-enabled` says enabled, `is-failed` says no, the
+unit's own journal is empty, and the service simply never exists. The only
+record is one line in the manager's log at boot, naming a unit that is not the
+one you are investigating.
 
 That third one matters more than it looks: the leading hypothesis for this
 fault is a marginal power rail, and **the instrument that would test it has

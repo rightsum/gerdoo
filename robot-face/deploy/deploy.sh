@@ -70,6 +70,20 @@ ssh "$ROBOT" "export XDG_RUNTIME_DIR=/run/user/\$(id -u); \
   systemctl --user enable --now video-player; \
   sleep 2; systemctl --user is-active video-player || echo 'video-player: not active — install mpv on the robot first'"
 
+# The battery bridge writes /tmp/battery_status.json, which the panel's battery
+# bars read. It had never once started on its own: its unit ordered itself
+# After=micro-ros-agent.service, which was itself ordered After=default.target
+# while being WantedBy it — so systemd found an ordering cycle and deleted this
+# service's start job. Silently: no failure, no journal entry, blank bars.
+# The unit shipped here has that edge removed.
+echo "==> Installing + starting battery-bridge unit (systemctl --user, no sudo)"
+ssh "$ROBOT" "export XDG_RUNTIME_DIR=/run/user/\$(id -u); \
+  cp $DEST/deploy/battery-bridge.service ~/.config/systemd/user/battery-bridge.service; \
+  systemctl --user daemon-reload; \
+  systemctl --user reenable battery-bridge >/dev/null 2>&1; \
+  systemctl --user restart battery-bridge; \
+  sleep 2; systemctl --user is-active battery-bridge || echo 'battery-bridge: not active'"
+
 echo "==> Installing kiosk autostart (replaces the old placetory autostart)"
 ssh "$ROBOT" "cp $DEST/deploy/robot-face-kiosk.desktop ~/.config/autostart/robot-face-kiosk.desktop; \
   rm -f ~/.config/autostart/firefox-fullscreen.desktop"

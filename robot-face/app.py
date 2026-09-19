@@ -24,10 +24,16 @@ from flask import (
 )
 from werkzeug.security import check_password_hash
 
+import audio
 import lidar
 import face_track
 import teensy
 import video
+# The path, from the module that writes it. It was hardcoded here once, and
+# when battery_bridge.py moved on, the constant was deleted from this file
+# while the handler that read it stayed — leaving /api/battery raising
+# NameError and the panel's battery bars silently blank for sixteen days.
+from battery_bridge import STATUS_FILE as BATTERY_FILE
 from camera import camera, CameraError
 import voice
 
@@ -868,6 +874,33 @@ def api_servo_set():
     except teensy.TeensyError as e:
         return jsonify(error=str(e)), 503
     return jsonify({"pan": pan, "tilt": tilt, "raw": raw})
+
+
+# ---- Speaker volume ----
+
+@app.route("/api/audio")
+def api_audio_get():
+    """How loud the speaker is, 0-100."""
+    try:
+        return jsonify({"percent": audio.get_volume()})
+    except audio.AudioError as e:
+        return jsonify(error=str(e)), 503
+
+
+@app.route("/api/audio", methods=["POST"])
+def api_audio_set():
+    """Set the speaker volume. Writes BOTH of the board's playback controls.
+
+    Same tier as the neck servos: a session is enough. Loud is recoverable;
+    the camera and lidar are the things held to a higher bar.
+    """
+    data = request.get_json(force=True, silent=True) or {}
+    if "percent" not in data:
+        return jsonify(error="no percent specified"), 400
+    try:
+        return jsonify({"percent": audio.set_volume(data["percent"])})
+    except audio.AudioError as e:
+        return jsonify(error=str(e)), 503
 
 
 if __name__ == "__main__":

@@ -297,6 +297,27 @@
       </div>
     </section>
 
+    <!-- ---------------- Audio ---------------- -->
+    <section class="panel" id="audio-panel">
+      <div class="panel-head">
+        <h2>Audio</h2>
+        <span style="font-size:13px;color:#8493b3;font-family:ui-monospace,monospace" id="vol-text">—</span>
+      </div>
+      <div class="panel-body">
+        <div style="display:flex;align-items:center;gap:12px;padding:8px 0">
+          <span style="font-size:14px;color:#8493b3">🔈</span>
+          <input id="vol-range" type="range" min="0" max="100" step="5" value="0"
+                 style="flex:1;accent-color:#2ad4ff">
+          <span style="font-size:14px;color:#8493b3">🔊</span>
+        </div>
+        <div style="font-size:12px;color:#8493b3;line-height:1.5">
+          Moves both of the board's playback controls at once. The quieter of the
+          two is what you actually hear — which is why a single control looked
+          like it worked and did nothing.
+        </div>
+      </div>
+    </section>
+
     
   </main>
   <div class="toast" id="toast"></div>
@@ -694,6 +715,42 @@
     }
     setInterval(pollBattery, 3000);
     pollBattery();
+
+
+    // ---- Audio (speaker volume) ----
+    // Outside the has_password guard on purpose: /api/audio is session-tier,
+    // like the neck servos. Camera and lidar are the endpoints held higher.
+    const volRange = document.getElementById('vol-range');
+    const volText = document.getElementById('vol-text');
+
+    async function refreshVolume() {
+      try {
+        const d = await api('/api/audio');
+        volRange.value = d.percent;
+        volText.textContent = d.percent + '%';
+      } catch {
+        volText.textContent = 'unavailable';
+      }
+    }
+
+    volRange.addEventListener('input', () => {
+      volText.textContent = volRange.value + '%';
+    });
+
+    // 'change', not 'input': one request when the handle is released, rather
+    // than one per pixel of the drag.
+    volRange.addEventListener('change', async () => {
+      try {
+        const d = await api('/api/audio', 'POST', { percent: Number(volRange.value) });
+        volRange.value = d.percent;
+        volText.textContent = d.percent + '%';
+      } catch {
+        volText.textContent = 'failed';
+      }
+    });
+
+    refreshVolume();
+    setInterval(refreshVolume, 15000);
 
 
     // ---- Neck Servos ----

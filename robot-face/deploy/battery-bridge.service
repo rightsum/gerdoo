@@ -1,0 +1,29 @@
+[Unit]
+Description=Battery status bridge (ROS 2 + I2C → JSON)
+
+# NO `After=micro-ros-agent.service` here, deliberately.
+#
+# That edge is what kept this service from ever running. micro-ros-agent.service
+# declares `After=default.target` while also being `WantedBy=default.target`,
+# and a unit wanted by a target is implicitly ordered Before it. So the chain
+# closed on itself:
+#
+#   default.target -> battery-bridge -> micro-ros-agent -> default.target
+#
+# systemd resolved that the only way it can, by deleting a job:
+#
+#   default.target: Found ordering cycle on battery-bridge.service/start
+#   Job battery-bridge.service/start deleted to break ordering cycle
+#
+# No failure, no error, no journal entry for the unit — it simply never started,
+# and the control panel's battery bars stayed blank. Ordering here buys nothing
+# anyway: the ROS subscriber attaches whenever the agent turns up, and
+# Restart=always covers the case where it is not there yet.
+
+[Service]
+ExecStart=/bin/bash -c "source /opt/ros/humble/setup.bash; cd %h/robot-face && python3 battery_bridge.py"
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
