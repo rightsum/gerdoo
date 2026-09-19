@@ -36,6 +36,7 @@ NNN-YYYY-MM-DD-short-title.md
 | [020](020-2026-09-18-video-playback-deployed.md) | 2026-09-18 | Deploying it: the search that answered early and exited late, a microphone source that vanished silently, an agent answering before the question ended — and six wrong theories about a deaf microphone | ✅ Playback working · ⏳ Wake word during loud playback unresolved |
 | [021](021-2026-09-19-kiosk-page-took-the-robot-down.md) | 2026-09-19 | The kiosk page took the robot down twice — a `fetch` whose rejection was logged by fetching again, 1019 threads, 1024 descriptors and an accept storm | ✅ Fixed and deployed · 🔄 Watching for recurrence |
 | [022](022-2026-09-19-the-robot-went-deaf-silently.md) | 2026-09-19 | The robot went deaf and every service said it was fine — a re-enumerating board, a detector left on the raw six-channel downmix, and a 30-second watchdog that heals it | ✅ Self-heal proven · ⏳ USB instability unexplained |
+| [023](023-2026-09-19-the-board-came-back-only-after-a-power-cut.md) | 2026-09-19 | Microphones and touchscreen both dead, recovered only by cutting power — a fault below every layer of software, a speaker setting that was never in force, and three instruments found broken | ✅ Recovered and verified · ❌ Cause unknown |
 
 Entries are either **problems** (001, 003) or **design decision records** (002). Both belong here — a decision you cannot reconstruct the reasoning for is as expensive as a bug you cannot reproduce.
 
