@@ -1,0 +1,12 @@
+[Unit]
+Description=Rebuild the echo-cancelled microphone and reattach the wake word
+
+[Service]
+Type=oneshot
+ExecStart=%h/wake-word/gerdoo-audio-repair.sh
+# Nothing here is worth failing a boot or a udev event over: the script already
+# exits 0 on every path it understands.
+SuccessExitStatus=0
+
+[Install]
+WantedBy=default.target

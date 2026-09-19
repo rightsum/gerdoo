@@ -1,0 +1,14 @@
+[Unit]
+Description=Check every 30s that the robot can still hear its name
+
+[Timer]
+# Thirty seconds is a compromise. The failure is silent — the robot keeps
+# answering "active" on every service while being deaf — so the only cost of
+# noticing late is that it ignores you until the next tick. The check itself is
+# two pactl calls and does nothing when healthy.
+OnBootSec=45s
+OnUnitActiveSec=30s
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

@@ -32,6 +32,11 @@ NNN-YYYY-MM-DD-short-title.md
 | [016](016-2026-09-02-agent-tools-search-and-time.md) | 2026-09-02 | Agent tools — web search and a clock with the Persian calendar, so it can answer about the outside world | ✅ Working |
 | [017](017-2026-09-03-face-tracking.md) | 2026-09-03 | The neck follows your face during a call, replacing gesture detection — and three definitions of "centre" that disagreed | ✅ Working |
 | [018](018-2026-09-15-xvf3800-hardware-aec.md) | 2026-09-15 | reSpeaker XVF3800 becomes the robot's mic and speaker — hardware echo cancellation, every software echo workaround removed, a hidden -20 dB volume control | ✅ Deployed · 🔄 Barge-in and wake-word range to re-test |
+| [019](019-2026-09-18-video-playback.md) | 2026-09-18 | YouTube video playback on the kiosk screen — mpv + yt-dlp over JSON IPC, a call takes the screen and video resumes after, a Persian stop phrase | ✅ Deployed — see 020 |
+| [020](020-2026-09-18-video-playback-deployed.md) | 2026-09-18 | Deploying it: the search that answered early and exited late, a microphone source that vanished silently, an agent answering before the question ended — and six wrong theories about a deaf microphone | ✅ Playback working · ⏳ Wake word during loud playback unresolved |
+| [021](021-2026-09-19-kiosk-page-took-the-robot-down.md) | 2026-09-19 | The kiosk page took the robot down twice — a `fetch` whose rejection was logged by fetching again, 1019 threads, 1024 descriptors and an accept storm | ✅ Fixed and deployed · 🔄 Watching for recurrence |
+| [022](022-2026-09-19-the-robot-went-deaf-silently.md) | 2026-09-19 | The robot went deaf and every service said it was fine — a re-enumerating board, a detector left on the raw six-channel downmix, and a 30-second watchdog that heals it | ✅ Self-heal proven · ⏳ USB instability unexplained |
+| [023](023-2026-09-19-the-board-came-back-only-after-a-power-cut.md) | 2026-09-19 | Microphones and touchscreen both dead, recovered only by cutting power — a fault below every layer of software, a speaker setting that was never in force, and three instruments found broken | ✅ Recovered and verified · ❌ Cause unknown |
 
 Entries are either **problems** (001, 003) or **design decision records** (002). Both belong here — a decision you cannot reconstruct the reasoning for is as expensive as a bug you cannot reproduce.
 

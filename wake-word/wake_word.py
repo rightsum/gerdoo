@@ -41,15 +41,12 @@ import numpy as np
 from scipy.signal import resample_poly
 from vosk import Model, KaldiRecognizer, SetLogLevel
 
+import phrases
+from phrases import (WAKE_HEAD, WAKE_PHRASE, WAKE_PHRASES, WAKE_TAILS,
+                     MAX_UTTERANCE_TOKENS, score)
+
 DEFAULT_MODEL = os.path.expanduser("~/models/vosk-model-small-fa-0.42")
 DEFAULT_SOUND = os.path.expanduser("~/wake-word/sounds/janam.mp3")
-
-WAKE_PHRASE = "گردو بابا"
-WAKE_HEAD = "گردو"   # the discriminating half; "بابا" alone is far too common
-
-# Longest utterance still treated as someone calling the robot. Above this it is
-# conversation, not a wake word.
-MAX_UTTERANCE_TOKENS = 4
 
 # How often to re-read the panel's master switch. Also bounds how long the
 # microphone stays open after someone switches voice off.
@@ -57,16 +54,17 @@ SWITCH_POLL_S = 2.0
 
 # Two grammars, and the difference matters far more than the confidence threshold.
 #
-# STRICT is the phrase and "[unk]" only. It maximises recall, but "[unk]" is a
+# STRICT is the phrases and "[unk]" only. It maximises recall, but "[unk]" is a
 # weak absorber: with nothing else on offer, ordinary speech collapses onto the
 # one real phrase available. That is the false-positive mode seen in service.
-#
+GRAMMAR_STRICT = phrases.strict_grammar()
+
 # FILLER adds competing words — deliberately including the near neighbours of
 # "گردو" that fell out of the open-mode calibration (کردی, کردم, کرده) plus
 # common conversational Persian. Giving the decoder somewhere else to go is what
 # suppresses false accepts; a narrower grammar makes them worse, not better.
-GRAMMAR_STRICT = json.dumps([WAKE_PHRASE, "[unk]"], ensure_ascii=False)
-
+# A tuning table, not logic, so it stays here rather than moving to phrases.py.
+# The phrases.grammar() call below must stay AFTER this list is defined.
 FILLER_WORDS = [
     # near neighbours of گردو, straight from the calibration transcript
     "کردی", "کردم", "کرده", "کردن", "گرفتم", "برو", "بردار", "درو", "گرم",
@@ -76,8 +74,7 @@ FILLER_WORDS = [
     "الان", "خوبه", "دارم", "داره", "میکنه", "بیا", "چیه", "یه", "که", "این",
     "اون", "هست", "نیست", "خیلی", "چرا", "کجا", "آره", "نه", "باشه", "ممنون",
 ]
-GRAMMAR_FILLER = json.dumps([WAKE_PHRASE] + FILLER_WORDS + ["[unk]"],
-                            ensure_ascii=False)
+GRAMMAR_FILLER = phrases.grammar(FILLER_WORDS)
 
 SAMPLE_RATE = 16000     # what the Vosk models expect
 # The XVF3800 is natively 16 kHz. --capture-rate still accepts any integer
@@ -132,6 +129,26 @@ def voice_disabled(base_url, timeout=3.0):
         with urllib.request.urlopen(f"{base_url}/api/voice/status", timeout=timeout) as r:
             return json.loads(r.read()).get("enabled", True) is False
     except Exception:
+        return False
+
+
+def video_playing(base_url, timeout=3.0):
+    """True if something is on the robot's screen right now."""
+    try:
+        with urllib.request.urlopen(f"{base_url}/api/video/status",
+                                    timeout=timeout) as r:
+            return bool(json.loads(r.read()).get("playing"))
+    except Exception:
+        return False
+
+
+def stop_video(base_url, timeout=5.0):
+    req = urllib.request.Request(f"{base_url}/api/video/stop", method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status == 200
+    except Exception as e:
+        print(f"  video stop failed: {e}", file=sys.stderr)
         return False
 
 
@@ -200,52 +217,6 @@ def wait_for_session_end(base_url, poll_s=1.0, max_s=SESSION_MAX_S):
     return False
 
 
-def score(result):
-    """
-    (matched, mean_confidence, text) for one final Vosk result.
-
-    Vosk reports a per-word confidence in `result`. Averaging over just the wake
-    phrase's words — rather than the whole utterance — keeps surrounding speech
-    from dragging the score around.
-    """
-    text = result.get("text", "").strip()
-
-    # The two words must be ADJACENT. Merely containing both somewhere is not
-    # enough: under the filler grammar, ordinary conversation produced hits like
-    # "بابا نیست اون خانم گردو آقا" and "بابا میکنه الان گردو بابا میکنه گرم
-    # خیلی", which contain both words scattered among filler. Roughly a third of
-    # all triggers were this. Requiring the actual phrase removes them.
-    tokens = text.split()
-
-    # Calling the robot is a SHORT utterance. Continuous conversation that
-    # happens to contain the phrase is long — the false positives in the log ran
-    # 7 to 15 words ("بابا میکنه الان گردو بابا میکنه گرم خیلی"), while every
-    # genuine call was 2 or 3. Length separates them cleanly.
-    if len(tokens) > MAX_UTTERANCE_TOKENS:
-        return False, 0.0, text
-
-    idx = None
-    for i in range(len(tokens) - 1):
-        if tokens[i] == WAKE_HEAD and tokens[i + 1] == "بابا":
-            idx = i
-            break
-    if idx is None:
-        return False, 0.0, text
-
-    # Score only the two words of the phrase itself, positionally — not every
-    # occurrence of either word in the utterance, which let surrounding filler
-    # drag the average around.
-    words = result.get("result", [])
-    if len(words) == len(tokens) and idx + 1 < len(words):
-        pair = words[idx:idx + 2]
-    else:
-        pair = [w for w in words if w.get("word") in (WAKE_HEAD, "بابا")]
-    if not pair:
-        return True, 1.0, text          # no per-word data; grammar match alone
-    conf = sum(w.get("conf", 0.0) for w in pair) / len(pair)
-    return True, conf, text
-
-
 def to_model_rate(raw, decim, gain=1.0):
     """Native-rate int16 bytes -> 16 kHz int16 bytes, with optional gain."""
     if decim == 1 and gain == 1.0:
@@ -281,18 +252,23 @@ def run_replay(model, path, args, threshold, quiet=False, gain=None):
                 break
             data = to_model_rate(data, 1, gain)
             if rec.AcceptWaveform(data):
-                matched, conf, text = score(json.loads(rec.Result()))
+                action, conf, text = score(json.loads(rec.Result()))
                 if text and not quiet and args.verbose:
                     print(f"    heard: {text}   conf={conf:.2f}")
-                if matched and conf >= threshold:
+                if action and conf >= threshold:
                     hits += 1
                     if not quiet:
-                        print(f"    HIT   conf={conf:.2f}   {text}")
-        matched, conf, text = score(json.loads(rec.FinalResult()))
-        if matched and conf >= threshold:
+                        print(f"    HIT   conf={conf:.2f}   {action}   {text}")
+        # Tail flush: whatever AcceptWaveform never emitted as a final result
+        # because the recording simply ended mid-utterance. Skipping this call
+        # means --replay and --sweep silently drop the last utterance of every
+        # recording — the exact tool used to prove the detector has not
+        # regressed would then under-count on every run.
+        action, conf, text = score(json.loads(rec.FinalResult()))
+        if action and conf >= threshold:
             hits += 1
             if not quiet:
-                print(f"    HIT   conf={conf:.2f}   {text}")
+                print(f"    HIT   conf={conf:.2f}   {action}   {text}")
     return hits
 
 
@@ -487,10 +463,10 @@ def main():
                 # Finals only. Partials fired mid-sentence during calibration.
                 if not rec.AcceptWaveform(data):
                     continue
-                matched, conf, text = score(json.loads(rec.Result()))
+                action, conf, text = score(json.loads(rec.Result()))
                 if text and args.verbose:
                     print(f"  heard: {text}   conf={conf:.2f}", flush=True)
-                if not (matched and conf >= args.threshold):
+                if not (action and conf >= args.threshold):
                     continue
 
                 now = time.time()
@@ -507,10 +483,28 @@ def main():
                         w.setnchannels(1); w.setsampwidth(2); w.setframerate(SAMPLE_RATE)
                         w.writeframes(b"".join(ring))
                     saved = f"  audio={p}"
-                line = f"[{stamp}] TRIGGER #{hits}  conf={conf:.2f}  {text}{saved}"
+                line = f"[{stamp}] TRIGGER #{hits}  {action}  conf={conf:.2f}  {text}{saved}"
                 print(line, flush=True)
                 if logfh:
                     logfh.write(line + "\n")
+
+                # "گردو بسه" only means anything while a video is playing.
+                # Ignoring it otherwise keeps a second phrase from becoming a
+                # second source of false positives when the robot is idle.
+                if action == "stop":
+                    if args.voice_url and video_playing(args.voice_url):
+                        stop_video(args.voice_url)
+                        print("  video stopped by voice", flush=True)
+                        if logfh:
+                            logfh.write("  video stopped by voice\n")
+                    else:
+                        print("  stop phrase, but nothing is playing", flush=True)
+                        if logfh:
+                            logfh.write("  stop phrase, but nothing is playing\n")
+                    rec.Reset()
+                    last_fire = time.time()
+                    continue
+
                 # Master switch. Checked before the chime, so a disabled robot
                 # stays completely silent rather than announcing a wake it will
                 # not act on.

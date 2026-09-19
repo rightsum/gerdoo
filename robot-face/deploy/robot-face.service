@@ -8,6 +8,19 @@ ExecStart=/usr/bin/python3 /home/jarvis/robot-face/app.py
 Restart=on-failure
 RestartSec=3
 
+# The default soft limit is 1024, and this app has hit it twice — hard enough to
+# stop accepting connections at all. Flask's development server runs a thread per
+# connection, so anything that opens connections faster than they are closed
+# converts directly into descriptors, and at 1024 accept() fails in a tight loop:
+# the panel stops answering, the listen queue fills, and journald burns a core
+# logging the failures.
+#
+# The real cause was the kiosk page turning a failed request into two more (see
+# jslog in face.html); this is the seatbelt, not the fix. It buys hours instead of
+# minutes if something else ever leaks, which is the difference between noticing a
+# problem and losing the robot.
+LimitNOFILE=65536
+
 # Installed as a *user* service (systemctl --user) so it needs no root. With
 # gdm autologin, the jarvis session — and this service — start on boot.
 [Install]

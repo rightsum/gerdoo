@@ -29,6 +29,7 @@ from livekit.plugins import elevenlabs, openai, silero
 from livekit.agents import function_tool
 
 import local_time
+import video_control
 import web_search
 from session_rules import SilenceTimer, is_closing_phrase
 
@@ -71,6 +72,60 @@ async def look_it_up(context: RunContext, query: str) -> str:
     result = await web_search.search(query)
     _trace(f"SEARCH returned {len(result)} chars")
     return result
+
+
+# Set by play_video. The entrypoint waits on it and shuts the session down once
+# she has finished speaking: the video wants the screen and the speaker, and a
+# call sitting on top of it would both compete for audio and hold the face.
+#
+# Module-level, but each job gets its own fresh subprocess under the default
+# PROCESS executor, so this Event is already per-job by construction. It would
+# only be shared across jobs under JobExecutorType.THREAD (what `agent.py
+# console` forces).
+end_call = asyncio.Event()
+
+
+@function_tool
+async def play_video(context: RunContext, query_or_url: str,
+                     start_at: str = "") -> str:
+    """
+    Play a YouTube video on the robot's own screen.
+
+    Use it when asked to play, show, or put on a video, a song, a clip or a
+    film. The conversation ENDS when you do this — the video takes the screen —
+    so say one short sentence confirming what you are playing, and nothing else
+    afterwards.
+
+    Args:
+        query_or_url: A YouTube URL, or what to search for. A search phrase
+            works best as the words a person would type: artist and title.
+        start_at: Optional point to start at, like "1:30" or "90". Leave empty
+            to start at the beginning.
+    """
+    out = await asyncio.to_thread(video_control.play, query_or_url,
+                                  start_at or None)
+    _trace(f"PLAY VIDEO {query_or_url!r} -> {out}")
+    if not out.get("ok"):
+        return f"Could not play it: {out.get('error', 'unknown error')}"
+    end_call.set()
+    title = out.get("title") or "it"
+    return (f"Playing {title} now. Tell the user in one short sentence, then "
+            "stop talking — the call is ending and the video is starting.")
+
+
+@function_tool
+async def stop_video(context: RunContext) -> str:
+    """
+    Stop whatever video is playing on the robot's screen.
+
+    Use it when asked to stop, close, or turn off the video.
+    """
+    out = await asyncio.to_thread(video_control.stop)
+    _trace(f"STOP VIDEO -> {out}")
+    if not out.get("ok"):
+        return f"Could not stop it: {out.get('error', 'unknown error')}"
+    return "Stopped."
+
 
 load_dotenv()
 log = logging.getLogger("gerdoo-voice")
@@ -116,6 +171,17 @@ SYSTEM_PROMPT = (
     "'بذار ببینم' or 'let me check'.\n"
     "- If the search fails or finds nothing useful, say so plainly rather "
     "than inventing an answer.\n\n"
+    "VIDEO. You can play a video on your own screen with play_video, and stop it "
+    "with stop_video. When you play something, the conversation ends immediately "
+    "so the video can have the screen — say one short sentence about what you are "
+    "playing and nothing more. If the user asks for something you cannot find, "
+    "say so instead of playing something else.\n"
+    "- NEVER say you are playing, putting on, or about to play something unless "
+    "you have actually called play_video and it succeeded. Saying it is not doing "
+    "it. If you did not call the tool, nothing is playing, and claiming otherwise "
+    "leaves the person staring at a screen that never changes.\n"
+    "- If the tool returns an error, say plainly that it did not work. Do not "
+    "pretend it did.\n\n"
     "TIME AND DATE:\n"
     "- You have a clock tool. Use it for the time, the date, the day of the "
     "week, or anything that depends on today — never guess.\n"
@@ -190,6 +256,11 @@ def _trace(msg):
 
 async def entrypoint(ctx: JobContext):
     _trace("entrypoint ENTER")
+    # Defensive, not required today: under PROCESS (the default), each job is
+    # its own subprocess, so end_call starts unset regardless. This only
+    # matters if the executor ever becomes THREAD, where a flag left set by a
+    # previous call would end the next one instantly.
+    end_call.clear()
     await ctx.connect()
     _trace("connected to room")
 
@@ -258,7 +329,25 @@ async def entrypoint(ctx: JobContext):
                 # so it 401s, retries, and falls back to VAD anyway — after
                 # burning a couple of seconds on every session.
                 "mode": "vad",
-            }
+            },
+            # OFF. It is ON by default — and passing this dict at all does not
+            # opt out, because the library fills every key we omit from its own
+            # defaults.
+            #
+            # Preemptive generation starts answering from a PARTIAL transcript,
+            # before the turn ends. Asked in Persian to play a song on YouTube,
+            # she said she would and never called the tool: one second from
+            # thinking to speaking, no tool call in the trace. The same model,
+            # given the same request with the real prompt and all four tools,
+            # called play_video 5 times out of 5 — so the model is not the
+            # problem. The agent log shows preemptive generations being thrown
+            # away "because the transcript, chat context, tools, or tool choice
+            # changed"; the ones that are NOT thrown away are answers composed
+            # before the request was complete.
+            #
+            # A speculative reply is a bad trade for a robot that acts on what it
+            # hears: a fraction of a second saved against doing the wrong thing.
+            "preemptive_generation": {"enabled": False},
         },
     )
 
@@ -323,7 +412,7 @@ async def entrypoint(ctx: JobContext):
 
     await session.start(
         agent=Agent(instructions=SYSTEM_PROMPT,
-                    tools=[look_it_up, what_time_is_it]),
+                    tools=[look_it_up, what_time_is_it, play_video, stop_video]),
         room=ctx.room,
         # The browser only sees "idle" via its Disconnected handler, so the
         # room must be deleted when this session ends — otherwise the face
@@ -374,6 +463,19 @@ async def entrypoint(ctx: JobContext):
     watch = asyncio.create_task(_watch_silence())
     _background.add(watch)
     watch.add_done_callback(_background.discard)
+
+    async def _watch_end_call():
+        """A video was requested. Let her finish the sentence, then hang up."""
+        await end_call.wait()
+        while session.agent_state in ("speaking", "thinking"):
+            await asyncio.sleep(0.2)
+        _trace("ending the call so the video can start")
+        ctx.shutdown(reason="video requested")
+        finished.set()
+
+    ender = asyncio.create_task(_watch_end_call())
+    _background.add(ender)
+    ender.add_done_callback(_background.discard)
 
     if GREET:
         try:

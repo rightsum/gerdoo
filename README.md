@@ -19,7 +19,8 @@ I've been building things since my teenage years, when I sold my first piece of 
 - **Senses the room.** RPLIDAR C1 publishes `/scan` at 10 Hz, and the control panel shows a live LiDAR view.
 - **Sets the mood.** Ambient LED strip lighting, dimmable from the Teensy.
 - **Has a split brain.** Jetson Orin Nano runs ROS 2, planning, vision and AI. Teensy 4.1 on micro-ROS handles the motors, servos and encoders in real time.
-- **Keeps a lab notebook.** 17 logged write-ups of problems, wrong turns, root causes and fixes, in [`docs/logs/`](docs/logs/)
+- **Plays video.** Say a title or paste a link and it plays on the kiosk screen, `mpv` driven over its own IPC socket; a call in progress takes priority and the video picks back up where it left off.
+- **Keeps a lab notebook.** 19 logged write-ups of problems, wrong turns, root causes and fixes, in [`docs/logs/`](docs/logs/)
 
 Everything below is working documentation, written for me and for the agents helping me build this as much as for you.
 
@@ -31,7 +32,7 @@ Everything below is working documentation, written for me and for the agents hel
 | [`docs/logs/`](docs/logs/) | One write-up per problem or design decision: evidence, wrong turns, root cause, fix, verification |
 | [`teensy_bringup/`](teensy_bringup/) | Minimal health-check firmware + `health_check.py` |
 | [`teensy_microros/`](teensy_microros/) | micro-ROS node. Dual Serial, console preserved |
-| [`robot-face/`](robot-face/) | Kiosk face on the robot's screen + LAN control panel (mood, camera stream, live LiDAR view) |
+| [`robot-face/`](robot-face/) | Kiosk face on the robot's screen + LAN control panel (mood, camera stream, live LiDAR view, video playback) |
 | [`voice-agent/`](voice-agent/) | LiveKit voice agent. Runs on the Mac, the Jetson joins the room |
 | [`wake-word/`](wake-word/) | Persian wake word, offline Vosk |
 

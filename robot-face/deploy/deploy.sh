@@ -46,13 +46,29 @@ ssh "$ROBOT" "export XDG_RUNTIME_DIR=/run/user/\$(id -u); \
 
 # Also installed but not enabled. Runs from ~/gesture-venv (MediaPipe needs
 # numpy 2.2 / cv2 5.0, which would break the system cv2 4.8 and ROS).
-echo "==> Installing on-demand gesture unit (installed, not enabled)"
+echo "==> Installing on-demand face-track unit (installed, not enabled)"
 ssh "$ROBOT" "export XDG_RUNTIME_DIR=/run/user/\$(id -u); \
-  cp $DEST/deploy/gesture.service ~/.config/systemd/user/gesture.service; \
+  cp $DEST/deploy/face-track.service ~/.config/systemd/user/face-track.service; \
   systemctl --user daemon-reload; \
-  echo -n 'gesture unit: '; systemctl --user list-unit-files gesture.service --no-legend; \
-  test -x ~/gesture-venv/bin/python && echo 'gesture venv: OK' || echo 'gesture venv: MISSING — see logs/010'; \
-  test -f $DEST/models/gesture_recognizer.task && echo 'gesture model: OK' || echo 'gesture model: MISSING — see logs/010'"
+  echo -n 'face-track unit: '; systemctl --user list-unit-files face-track.service --no-legend; \
+  test -x ~/gesture-venv/bin/python && echo 'face-track venv: OK' || echo 'face-track venv: MISSING — see logs/010'; \
+  test -f $DEST/models/blaze_face_short_range.tflite && echo 'face-track model: OK' || echo 'face-track model: MISSING — see logs/010'"
+
+# Enabled at boot, unlike lidar and face-track above: the control panel talks
+# to mpv over its IPC socket, so mpv must already be up and listening whenever
+# a video is requested, not started on demand.
+#
+# mpv itself is installed by hand (see README), not by this script, so on a
+# robot that doesn't have it yet the unit will enable but sit restarting.
+# That check must not abort the deploy — a run for an unrelated change would
+# otherwise skip kiosk-autostart and the final banner just because mpv isn't
+# installed yet.
+echo "==> Installing + starting video-player unit (systemctl --user, no sudo)"
+ssh "$ROBOT" "export XDG_RUNTIME_DIR=/run/user/\$(id -u); \
+  cp $DEST/deploy/video-player.service ~/.config/systemd/user/video-player.service; \
+  systemctl --user daemon-reload; \
+  systemctl --user enable --now video-player; \
+  sleep 2; systemctl --user is-active video-player || echo 'video-player: not active — install mpv on the robot first'"
 
 echo "==> Installing kiosk autostart (replaces the old placetory autostart)"
 ssh "$ROBOT" "cp $DEST/deploy/robot-face-kiosk.desktop ~/.config/autostart/robot-face-kiosk.desktop; \

@@ -10,10 +10,12 @@ Serves three things on one port:
 Mood changes made in /control are pushed to every open face over Server-Sent Events,
 so the robot's expression updates instantly with no page refresh.
 """
+import hmac
 import json
 import os
 import time
 import queue
+import subprocess
 import threading
 
 from flask import (
@@ -25,6 +27,7 @@ from werkzeug.security import check_password_hash
 import lidar
 import face_track
 import teensy
+import video
 from camera import camera, CameraError
 import voice
 
@@ -240,14 +243,85 @@ def _voice_cfg():
     )
 
 
+def _current_url():
+    """The URL mpv is playing, for remembering across a call."""
+    return video.command("get_property", "path")
+
+
+def _video_yield_to_call():
+    """
+    Stop a playing video and remember where it was.
+
+    Pausing would leave mpv's window on screen covering the face, so a call
+    would happen behind a frozen frame. Stopping takes the window away; the
+    position comes back on resume. The cost is a second of re-buffering
+    afterwards, which is cheaper than juggling windows with the WM.
+
+    Whether there is something to yield is decided from mpv's `path` (via
+    _current_url()), not status()["playing"]. loadfile is asynchronous and
+    mpv's own ytdl_hook re-resolves the URL, so `playing` stays false for
+    seconds after play_url() returns while `path` is set as soon as loadfile
+    is accepted. Keying off `playing` let a call starting in that window see
+    "not playing", record nothing, and return — the video then appeared
+    fullscreen over the call with no pending record and nothing left to stop
+    it. Once there is a path, stop() runs unconditionally: stopping an
+    already-idle player is harmless, and doing it every time is what
+    guarantees nothing survives into the call.
+    """
+    try:
+        url = _current_url()
+        if not url:
+            return
+        st = video.status()
+        # Position is unavailable while mpv is still resolving the URL (the
+        # window above). Reuse whichever start time is already on file for
+        # this video rather than inventing one — 0 only if nothing was ever
+        # recorded.
+        position = st.get("position")
+        if position is None:
+            position = (_pending() or {}).get("start") or 0
+        _set_pending({"url": url, "title": st.get("title"), "start": position})
+        video.stop()
+    except video.VideoError as e:
+        app.logger.warning("video: could not pause for the call (%s)", e)
+
+
+def _video_resume_after_call():
+    record = _pending()
+    if not record:
+        return
+    # Clear the record whether the resume succeeds or fails. A stuck record
+    # asserts "this video is coming" to /api/video/status forever, so the
+    # panel would advertise a video that will never play. The player unit
+    # restarts itself (Restart=always), so a failure here is usually worse
+    # than a transient blip a silent retry could heal, and recovery is one
+    # click away — the panel's Play button or asking again by voice. Do not
+    # "fix" this back into a retry without dealing with that lie.
+    try:
+        video.play_url(record["url"], start=record.get("start") or None)
+    except video.VideoError as e:
+        app.logger.warning(
+            "video: could not resume after the call (%s) - dropping pending video", e)
+    finally:
+        _set_pending(None)
+
+
 def _set_voice(state, detail=""):
     """Update voice state and push it to the face over the existing SSE."""
+    was = load_state().get("voice", "idle")
+    # The screen belongs to the call: a video steps aside when one starts and
+    # comes back when it ends. This is also what makes a video requested DURING
+    # a call start afterwards — both use the same pending record.
+    if state != "idle" and was == "idle":
+        _video_yield_to_call()
     s = load_state()
     s["voice"] = state
     s["voice_detail"] = detail
     s["updated"] = time.time()
     save_state(s)
     broadcast(s)
+    if state == "idle" and was != "idle":
+        _video_resume_after_call()
     return s
 
 
@@ -326,6 +400,38 @@ def api_voice_enabled():
     return jsonify({"enabled": voice_enabled()})
 
 
+AUDIO_SETUP = os.path.expanduser("~/wake-word/audio-setup.sh")
+MIC_SOURCE = "gerdoo_mic"
+
+
+def _ensure_mic():
+    """
+    Make sure the echo-cancelled microphone exists before a call starts.
+
+    `gerdoo_mic` carries only the XVF3800's processed channel. PulseAudio drops a
+    remapped source when its master disappears for a moment — a USB blip is
+    enough — and nothing puts it back, because audio-setup.sh runs only when the
+    wake-word service starts. With it gone the browser falls back to the raw
+    six-channel input, which mixes the UN-cancelled microphones back in, and the
+    robot transcribes its own voice.
+
+    That happened in service, and the worst part is how quiet the failure is:
+    every service reports healthy and the only symptom is the robot talking to
+    itself. A call is the one moment this must be right, so it is checked here.
+    Failure to check is never allowed to block the call.
+    """
+    try:
+        listed = subprocess.run(["pactl", "list", "short", "sources"],
+                                capture_output=True, text=True, timeout=5)
+        if MIC_SOURCE in listed.stdout:
+            return
+        app.logger.warning("%s missing before a call — re-running audio setup",
+                           MIC_SOURCE)
+        subprocess.run([AUDIO_SETUP], capture_output=True, text=True, timeout=30)
+    except Exception as e:
+        app.logger.warning("microphone check failed (%s)", e)
+
+
 @app.route("/api/voice/wake", methods=["POST"])
 def api_voice_wake():
     """Called by the wake-word service. Mints a token and tells the face to join."""
@@ -333,6 +439,7 @@ def api_voice_wake():
         return jsonify(error="forbidden"), 403
     if not voice_enabled():
         return jsonify({"error": "voice disabled"}), 409
+    _ensure_mic()
     url, key, secret = _voice_cfg()
     token = voice.mint_token(VOICE_ROOM, "face", key, secret,
                              metadata={"stt_language": stt_language()})
@@ -398,6 +505,111 @@ def api_voice_status():
                     "detail": st.get("voice_detail", ""),
                     "enabled": voice_enabled(),
                     "language": stt_language()})
+
+
+# ---- Video ----
+# The agent runs on another machine, so local_only() cannot be the gate here.
+# A shared token opens these routes and ONLY these routes; everything else keeps
+# session login. The token lives in config.json, which is gitignored.
+def video_guard():
+    """None to proceed, or a response to abort with."""
+    token = load_config().get("video_token", "")
+    sent = request.headers.get("X-Video-Token", "")
+    # Constant-time compare: this is the one shared secret in the system, and
+    # a plain `==` leaks how many leading bytes matched through its timing. A
+    # future reader must not "simplify" this back to `==`. Comparing as UTF-8
+    # bytes (not str) also keeps a non-ASCII header from raising TypeError out
+    # of compare_digest — it must deny cleanly, not 500.
+    if token and sent and hmac.compare_digest(
+            token.encode("utf-8"), sent.encode("utf-8")):
+        return None
+    if logged_in() or local_only():
+        return None
+    app.logger.warning("video: rejected request from %s", request.remote_addr)
+    return jsonify(error="forbidden"), 403
+
+
+def _pending():
+    return load_state().get("video_pending")
+
+
+def _set_pending(record):
+    s = load_state()
+    s["video_pending"] = record
+    s["updated"] = time.time()
+    save_state(s)
+
+
+@app.route("/api/video/play", methods=["POST"])
+def api_video_play():
+    guard = video_guard()
+    if guard:
+        return guard
+    data = request.get_json(force=True, silent=True) or {}
+    target = (data.get("url_or_query") or "").strip()
+    if not target:
+        return jsonify(error="nothing to play"), 400
+    try:
+        url, title = video.resolve(target)
+        start = video.parse_start(data.get("start"), url=url)
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+    except video.VideoError as e:
+        return jsonify(error=str(e)), 400
+
+    # Deferral is a rule, not a parameter: anything asked for during a call
+    # starts when the call ends. One record serves both this and a video
+    # interrupted BY a call, so the two can never both fire.
+    if load_state().get("voice", "idle") != "idle":
+        _set_pending({"url": url, "title": title, "start": start or 0})
+        return jsonify(ok=True, title=title, deferred=True)
+
+    try:
+        video.play_url(url, start=start)
+    except video.VideoError as e:
+        return jsonify(error=str(e)), 503
+    _set_pending(None)
+    return jsonify(ok=True, title=title, deferred=False)
+
+
+@app.route("/api/video/stop", methods=["POST"])
+def api_video_stop():
+    guard = video_guard()
+    if guard:
+        return guard
+    _set_pending(None)
+    try:
+        video.stop()
+    except video.VideoError as e:
+        return jsonify(error=str(e)), 503
+    return jsonify(ok=True)
+
+
+@app.route("/api/video/<action>", methods=["POST"])
+def api_video_pause_resume(action):
+    guard = video_guard()
+    if guard:
+        return guard
+    if action not in ("pause", "resume"):
+        return jsonify(error="unknown action"), 400
+    try:
+        getattr(video, action)()
+    except video.VideoError as e:
+        return jsonify(error=str(e)), 503
+    return jsonify(ok=True)
+
+
+@app.route("/api/video/status")
+def api_video_status():
+    guard = video_guard()
+    if guard:
+        return guard
+    try:
+        st = video.status()
+    except video.VideoError as e:
+        return jsonify(error=str(e), playing=False, deferred=bool(_pending())), 503
+    st["deferred"] = bool(_pending())
+    return jsonify(st)
 
 
 # ---- Auth ----

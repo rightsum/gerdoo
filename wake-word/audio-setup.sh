@@ -13,6 +13,15 @@ set -u
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 
 XVF_NAME="${XVF_NAME:-XVF3800}"
+# Maximum, by the owner's explicit request ("increase the volume to max").
+#
+# This was 85% for a while, on the theory that at full output the robot hears
+# itself through the room loudly enough that the XVF3800's canceller cannot
+# subtract it all and the agent transcribes its own voice. That was never
+# measured against a real call — and the setting did not survive anyway, because
+# PulseAudio drives PCM,0 to 100% on its own, so only PCM,1 was ever held back.
+# The shipped 67% is -20 dB and sounds broken; that end of the scale is certain.
+# If the agent starts hearing itself again, this is the first thing to lower.
 SPK_LEVEL="${SPK_LEVEL:-100%}"
 MIC_SOURCE=gerdoo_mic
 
