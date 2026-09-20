@@ -171,13 +171,15 @@ been the only thing that started a session, so a guard that assumed one caller
 had held for months. The button did not change any of that code — it just became
 the second caller, and that was enough.
 
-## Getting the toolbar over the video: a fight with the window manager
+## Getting the controls over the video: three designs, one survivor
 
 The button is worthless on the face alone — the case it exists for is a playing
-video, which is when shouting fails. That took three goes.
+video, which is when shouting fails. mpv owns the screen then, so the kiosk
+page's own toolbar is simply not visible.
 
-The video is native `mpv`, not in the browser. Sizing it to the screen minus a
-strip works (`--geometry=1920x890+0+0 --no-border --ontop`). But:
+**Design 1 — reserve a strip.** Size mpv to the screen minus the toolbar
+(`--geometry=1920x890 --no-border --ontop`) and let the page show through below.
+Blocked by the window manager:
 
 ```
 mpv      _NET_WM_STATE_ABOVE
@@ -186,38 +188,47 @@ stacking bottom→top:  mpv, firefox
 ```
 
 **xfwm4 stacks fullscreen above `_NET_WM_STATE_ABOVE`**, so the face covered the
-video entirely. `--ontop` does not beat fullscreen; `xdotool windowstate --remove
-FULLSCREEN` does not stick because `--kiosk` re-asserts it.
+video entirely. `--ontop` does not beat fullscreen, and `--kiosk` re-asserts
+fullscreen after it is stripped.
 
-**The browser had to stop being fullscreen.** `--kiosk` is what sets that state,
-so it is gone, replaced by:
+**Design 2 — take the browser out of fullscreen.** That does work, and the
+pieces are kept because they are useful on their own:
 
-- `chrome/userChrome.css` in the profile, hiding `#TabsToolbar`, `#nav-bar` and
-  the rest — with `toolkit.legacyUserProfileCustomizations.stylesheets` in
-  `user.js`, or the file is ignored silently.
-- `deploy/start-kiosk.sh`, which launches the browser, waits for its window, sets
-  `_MOTIF_WM_HINTS` to drop decorations, **remaps it** so the hint takes effect,
-  then sizes it to the screen. Firefox accepts no geometry flag on X11, so this
-  has to happen after mapping.
+- `deploy/firefox-userChrome.css` hides the chrome `--kiosk` used to hide, with
+  `toolkit.legacyUserProfileCustomizations.stylesheets` to load it at all.
+- `deploy/start-kiosk.sh` launches the browser and declares its window
+  `_NET_WM_WINDOW_TYPE_SPLASH` — undecorated by definition, and still in the
+  WM's *normal* layer, which is the point. `_MOTIF_WM_HINTS` was tried first and
+  is not reliable here: xfwm4 honoured it on some launches and drew
+  "Robot Face — Mozilla Firefox" across the top of the face on others. Shifting
+  the window up to hide the frame did not work either.
+- It also kills `plank`. That dock floats above the browser and sits exactly
+  where the Wake button is, ready to eat every tap meant for it.
 
-A maximized, undecorated window sits in the WM's normal layer, and mpv's `ABOVE`
-finally wins.
+But it costs **190px of picture** whenever a video plays, and that is most of
+what the robot's five-inch screen has.
 
-**`plank` had to go too.** The dock floats above the browser and sits exactly
-where the Wake button is, ready to swallow every tap meant for it.
-`start-kiosk.sh` kills it.
+**Design 3 — draw the controls inside mpv. Shipped.** `mpv-seek.lua` renders an
+ASS overlay: a translucent green "Wake!" circle bottom-centre, pause and stop
+beside it, all at 50% fill alpha so the video reads through them. Taps are
+hit-tested against the same coordinates they are drawn at, which sidesteps the
+panel-rotation problem the seek code above has to deal with — seek needs to know
+which side is *physically* left; a button does not.
 
-The strip is **190px** — set by the button, not by taste: 156px is about 9mm on
-this 440 PPI panel, and a smaller target cannot be hit. It costs nothing while
-idle, because mpv has no window at all then.
+mpv goes back to plain `--fullscreen`. The video keeps every pixel.
 
-Verified over a playing video, single tap, no wake word involved:
+One bug worth recording: the first `draw()` almost always fails, because at
+`file-loaded` the window has no size yet and `osd-dimensions` is 0. The redraw
+that follows was gated on the overlay already existing, so it never came and
+nothing was ever drawn. An `active` flag, set on `file-loaded` and cleared on
+`end-file`, is what the observers key off now.
+
+Verified end to end:
 
 ```
-mpv window: 1920x890
-before: voice=idle       video paused=false
-tap  →  voice=listening  (connected, mic enabled)
-tap  →  voice=idle
+playing                      → video fullscreen 1920x1080, controls drawn over it
+tap Wake (mpv overlay)       → voice=listening, video stopped, deferred=true
+tap End (page's own FAB)     → voice=idle, video replayed, position advancing
 ```
 
 ## The video pause that was already there
