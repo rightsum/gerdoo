@@ -46,9 +46,9 @@
        pixels. pointer-events:none lets every tap that misses a button fall
        through to what is underneath. */
     #toolbar {
-      position: fixed; left: 0; right: 0; bottom: 0; height: 190px;
-      display: flex; align-items: center; gap: 22px;
-      padding: 0 26px; box-sizing: border-box;
+      position: fixed; left: 0; right: 0; bottom: 0; height: 210px;
+      display: flex; align-items: flex-end; gap: 22px; padding-bottom: 26px;
+      padding-left: 26px; padding-right: 26px; box-sizing: border-box;
       background: none; border: 0; pointer-events: none;
     }
     #toolbar button { pointer-events: auto; }
@@ -67,20 +67,31 @@
        not work — so it is findable without looking, unlike the media buttons
        beside it. Centred rather than left, because the screen is reachable
        from either side. */
+    /* A dome sitting on the bottom edge — the flat side IS the screen edge, so
+       the whole shape is reachable and none of it is wasted off-screen. Its
+       colour is not set here: paintCall() takes it from the face, so the button
+       is always whatever the robot currently is. */
     #toolbar button#tb-call {
-      position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%);
-      width: 156px; height: 156px; min-width: 0; padding: 0;
-      border-radius: 50%; flex-direction: column; gap: 6px;
-      background: #1f6f4a; border: 1px solid #2f9668; color: #ffffff;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+      position: absolute; left: 50%; bottom: 0; transform: translateX(-50%);
+      width: 740px; height: 185px; min-width: 0;
+      padding: 0 0 38px 0;
+      /* A shallow ellipse, not a half circle: the arc sits low enough to read
+         as a rise from the bottom edge rather than a bubble over the face.
+         The `/` form is required — a single 370px radius gets clamped by the
+         185px height and degrades into a rounded rectangle. Horizontal radii
+         before the slash, vertical after. */
+      border-radius: 370px 370px 0 0 / 185px 185px 0 0;
+      border: 3px solid; border-bottom: 0;
+      background: transparent;
+      align-items: flex-end; justify-content: center;
+      box-shadow: none;
     }
     /* The word is the whole button now, so it carries the size. */
-    #tb-call-label { font: 700 40px/1 ui-sans-serif, system-ui, sans-serif;
+    #tb-call-label { font: 700 46px/1 ui-sans-serif, system-ui, sans-serif;
                      letter-spacing: 0.01em; }
-    #toolbar button#tb-call:active { background: #2a8d5f; border-color: #46c08c; }
-    /* In a call the same button ends it — red, so the two are never confused. */
-    #toolbar button#tb-call.in-call { background: #7a2020; border-color: #a83c3c; }
-    #toolbar button#tb-call.in-call:active { background: #9a2b2b; border-color: #c65656; }
+    /* Pressed state is a lift in the same hue, not a different colour: the
+       button's job is to look like part of the face, not like a control panel. */
+    #toolbar button#tb-call.pressed { filter: brightness(1.7); }
     /* The kiosk sets -webkit-tap-highlight-color: transparent globally, so a
        touch produces NO feedback at all unless it is put back by hand. Without
        this the toolbar feels broken even when it works. */
@@ -414,19 +425,43 @@
 
     // Call becomes End for the duration of a session. Driven from the same
     // `lastVoice` the face uses, so the two can never disagree.
-    let shownVoice = null;
+    let shownVoice = null, shownColour = null;
+
+    // The button borrows the face's own colour, so it reads as part of the
+    // robot rather than as a control pasted on top — and it follows the face
+    // through every voice state without a second colour table to keep in sync.
+    function faceRGB() {
+      const hex = (face.getAttribute('color') || '#2AD4FF').replace('#', '');
+      return [0, 2, 4].map(i => parseInt(hex.slice(i, i + 2), 16) || 0);
+    }
+
     function paintCall() {
       // apply() can fire from SSE before this section has run, and `tbCall` is
       // a const in its temporal dead zone until then. Bail rather than throw:
       // the 2s poll repaints immediately afterwards.
       if (typeof tbCall === 'undefined' || !tbCall) return;
+
+      const colour = face.getAttribute('color') || '#2AD4FF';
+      if (colour !== shownColour) {
+        shownColour = colour;
+        const [r, g, b] = faceRGB();
+        tbCall.style.background  = `rgba(${r},${g},${b},0.20)`;
+        tbCall.style.borderColor = `rgba(${r},${g},${b},0.60)`;
+        tbCall.style.color = '#ffffff';
+      }
+
       if (lastVoice === shownVoice) return;
       shownVoice = lastVoice;
       const busy = lastVoice !== 'idle';
       tbLabel.textContent = busy ? 'End' : 'Wake!';
-      tbCall.classList.toggle('in-call', busy);
       tbCall.setAttribute('aria-label', busy ? 'End the call' : 'Start a call');
     }
+
+    // The global kiosk CSS kills tap highlighting, so without this a press
+    // gives no feedback at all.
+    tbCall.addEventListener('pointerdown', () => tbCall.classList.add('pressed'));
+    ['pointerup', 'pointercancel', 'pointerleave'].forEach(e =>
+      tbCall.addEventListener(e, () => tbCall.classList.remove('pressed')));
 
     // Video liveness is in neither /api/state nor the SSE stream, so it needs
     // its own poll. 2s: fast enough that a tap on pause looks instant, slow

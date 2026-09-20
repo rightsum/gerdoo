@@ -97,12 +97,19 @@ end)
 
 local FACE_URL = os.getenv("GERDOO_FACE_URL") or "http://localhost:8080"
 
--- Sized for a 5 inch 1080p panel (~440 PPI): 156px is about 9mm, roughly an
--- Android 48dp touch target. Anything smaller cannot be hit reliably.
-local WAKE_R    = 78      -- radius, so 156 across
+-- Sized for a 5 inch 1080p panel (~440 PPI), where 156px is only about 9mm.
+-- The wake control is a DOME sitting on the bottom edge: its flat side is the
+-- screen edge, so every pixel of it is reachable and none is wasted off-screen.
+local WAKE_RX   = 370     -- dome half-width  (740 across)
+local WAKE_RY   = 185     -- dome height; shallow, so it rises from the
+                          -- bottom edge rather than bubbling over the picture
 local BTN       = 130     -- side of the square media buttons
 local MARGIN    = 40
-local BOTTOM    = 46      -- gap from the bottom edge
+local BOTTOM    = 26      -- gap from the bottom edge, media buttons only
+
+-- Fallback only. The real colour is the face's own, fetched below, so the
+-- control matches whatever the robot currently is.
+local FACE_COLOUR = "2AD4FF"
 
 local overlay = nil
 -- True between file-loaded and end-file. Needed separately from `overlay`
@@ -112,34 +119,35 @@ local overlay = nil
 local active = false
 
 local function buttons(w, h)
-    local cy = h - BOTTOM - WAKE_R
     local by = h - BOTTOM - BTN
     return {
-        wake  = {kind = "circle", cx = w / 2, cy = cy, r = WAKE_R},
+        -- Centre is ON the bottom edge, so only the top half is on screen.
+        wake  = {kind = "dome", cx = w / 2, cy = h, rx = WAKE_RX, ry = WAKE_RY},
         pause = {kind = "rect", x = MARGIN, y = by, w = BTN, h = BTN},
         stop  = {kind = "rect", x = MARGIN * 2 + BTN, y = by, w = BTN, h = BTN},
     }
 end
 
--- ASS drawing of a circle: four cubic beziers, control points at 0.5523r.
-local function ass_circle(cx, cy, r)
-    local k = r * 0.5523
+-- Upper half of a circle, closed along its flat side: two cubic beziers over
+-- the top (control points at 0.5523r, the usual circle approximation) and a
+-- straight line back across the bottom.
+local function ass_dome(cx, cy, rx, ry)
+    local kx, ky = rx * 0.5523, ry * 0.5523
     return string.format(
-        "m %d %d b %d %d %d %d %d %d b %d %d %d %d %d %d " ..
-        "b %d %d %d %d %d %d b %d %d %d %d %d %d",
-        cx - r, cy,
-        cx - r, cy - k, cx - k, cy - r, cx, cy - r,
-        cx + k, cy - r, cx + r, cy - k, cx + r, cy,
-        cx + r, cy + k, cx + k, cy + r, cx, cy + r,
-        cx - k, cy + r, cx - r, cy + k, cx - r, cy)
+        "m %d %d b %d %d %d %d %d %d b %d %d %d %d %d %d l %d %d",
+        cx - rx, cy,
+        cx - rx, cy - ky, cx - kx, cy - ry, cx, cy - ry,
+        cx + kx, cy - ry, cx + rx, cy - ky, cx + rx, cy,
+        cx - rx, cy)
 end
 
 local function ass_rect(x, y, w, h)
     return string.format("m %d %d l %d %d l %d %d l %d %d", x, y, x + w, y, x + w, y + h, x, y + h)
 end
 
--- \1a&H80& is 50% fill alpha: the video stays readable through every control.
-local ALPHA = "\\1a&H80&\\3a&H80&\\4a&HFF&"
+-- ASS alpha is inverted: 00 is opaque, FF invisible. CC is ~20% fill and 66 is
+-- ~60% border, so the video stays readable straight through every control.
+local ALPHA = "\\1a&HCC&\\3a&H66&\\4a&HFF&"
 
 local function draw()
     local dim = mp.get_property_native("osd-dimensions")
@@ -162,8 +170,10 @@ local function draw()
             x, y, size, text)
     end
 
-    shape("4A6F1F", ass_circle(b.wake.cx, b.wake.cy, b.wake.r))   -- green, BGR
-    label(b.wake.cx, b.wake.cy, 40, "Wake!")
+    -- ASS colours are BGR, so the face's RRGGBB is reversed here.
+    local bgr = FACE_COLOUR:sub(5, 6) .. FACE_COLOUR:sub(3, 4) .. FACE_COLOUR:sub(1, 2)
+    shape(bgr, ass_dome(b.wake.cx, b.wake.cy, b.wake.rx, b.wake.ry))
+    label(b.wake.cx, b.wake.cy - 52, 46, "Wake!")
 
     shape("12100E", ass_rect(b.pause.x, b.pause.y, b.pause.w, b.pause.h))
     label(b.pause.x + BTN / 2, b.pause.y + BTN / 2, 54, paused and "▶" or "❚❚")
@@ -188,9 +198,12 @@ local function post(path)
 end
 
 local function hit(pos, b)
-    if b.kind == "circle" then
-        local dx, dy = pos.x - b.cx, pos.y - b.cy
-        return dx * dx + dy * dy <= b.r * b.r
+    if b.kind == "dome" then
+        -- Ellipse test. The half below the screen edge cannot be tapped
+        -- anyway, so there is no need to exclude it.
+        local dx = (pos.x - b.cx) / b.rx
+        local dy = (pos.y - b.cy) / b.ry
+        return dx * dx + dy * dy <= 1
     end
     return pos.x >= b.x and pos.x <= b.x + b.w
        and pos.y >= b.y and pos.y <= b.y + b.h
@@ -226,7 +239,24 @@ end
 
 mp.add_forced_key_binding("MBTN_LEFT", "gerdoo-controls", tap_controls)
 
-mp.register_event("file-loaded", function() active = true; draw() end)
+-- Ask the face what colour it currently is, so the control matches it. Async:
+-- a slow or dead server must not hold up playback, and the fallback above is
+-- already on screen by then.
+local function refresh_colour()
+    mp.command_native_async({
+        name = "subprocess", playback_only = false, capture_stdout = true,
+        args = {"curl", "-s", "-m", "3", FACE_URL .. "/api/state"},
+    }, function(ok, res)
+        if not ok or not res or not res.stdout then return end
+        local hex = res.stdout:match('"color"%s*:%s*"#(%x%x%x%x%x%x)"')
+        if hex and hex:upper() ~= FACE_COLOUR then
+            FACE_COLOUR = hex:upper()
+            if active then draw() end
+        end
+    end)
+end
+
+mp.register_event("file-loaded", function() active = true; refresh_colour(); draw() end)
 mp.register_event("end-file", function() active = false; hide() end)
 mp.observe_property("pause", "bool", function() if active then draw() end end)
 mp.observe_property("osd-dimensions", "native", function() if active then draw() end end)
