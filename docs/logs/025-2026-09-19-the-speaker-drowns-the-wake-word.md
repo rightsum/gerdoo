@@ -119,12 +119,29 @@ robot's own voice.
 ## Mitigation built: a touch fallback
 
 If shouting cannot work at volume, the screen can. Added to the kiosk face a
-floating **"Wake!"** button — a circular FAB, centred at the bottom, which starts
-a voice session directly. It becomes **End** during a call.
+**"Wake!"** control that starts a voice session directly, becoming **End** during
+a call.
 
-Transparent and click-through (`pointer-events: none` on the container, `auto` on
-the buttons), so the face and any video keep the whole screen. Pause/resume and
-stop appear beside it only while something is playing.
+It settled into a wide, shallow, transparent **dome rising from the bottom
+edge** — 740x185, with the ellipse centre *on* the screen edge, so the flat side
+is the edge itself and every pixel of it is reachable. It took the colour of the
+face rather than a colour of its own: read from the face element at paint time,
+so it follows the robot through every voice state (cyan idle, amber connecting,
+red on error) with no second table to keep in sync.
+
+The container is click-through (`pointer-events: none`, with `auto` on the
+buttons), so the face keeps the whole screen and taps that miss fall through.
+Pause/resume and stop sit to the left, only while something is playing.
+
+Two shape notes, both of which cost a round trip:
+
+- **CSS needs the `/` radius form.** `border-radius: 370px 370px 0 0` is clamped
+  by the 185px height and silently degrades into a rounded rectangle. The dome
+  needs `370px 370px 0 0 / 185px 185px 0 0` — horizontal radii, then vertical.
+- **The same shape in ASS** is two cubic beziers over the top (control points at
+  0.5523r) closed with a straight line along the bottom, taking `rx` and `ry`
+  separately so it can be wider than tall. Hit-testing is an ellipse test to
+  match.
 
 Three bugs worth recording, all of them things that look right in a desktop
 browser and are wrong here:
@@ -138,6 +155,11 @@ browser and are wrong here:
   Media buttons stayed on screen with nothing playing.
 - **Both play and pause icons drew at once.** `hidden` on an inline-SVG child
   does not hide it. One path whose `d` is swapped, instead of two overlaid SVGs.
+
+The first version was a small green circle floating above the bottom edge. It
+was legible on a desktop screenshot and wrong on the robot: too small to hit,
+and visibly a control bolted onto the face rather than part of it. Taking the
+face's own colour and growing into the edge fixed both at once.
 
 ## The button broke calls before it fixed them
 
