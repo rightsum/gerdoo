@@ -191,22 +191,28 @@ stacking bottom→top:  mpv, firefox
 video entirely. `--ontop` does not beat fullscreen, and `--kiosk` re-asserts
 fullscreen after it is stripped.
 
-**Design 2 — take the browser out of fullscreen.** That does work, and the
-pieces are kept because they are useful on their own:
+**Design 2 — take the browser out of fullscreen.** `--kiosk` is what sets
+`_NET_WM_STATE_FULLSCREEN`, so it was replaced with a `userChrome.css` that hid
+the chrome and a launcher that declared the window
+`_NET_WM_WINDOW_TYPE_SPLASH` — undecorated by definition and still in the WM's
+normal layer, which is what let mpv float above it. `_MOTIF_WM_HINTS` was tried
+first and is not reliable here: xfwm4 honoured it on some launches and drew
+"Robot Face — Mozilla Firefox" across the top of the face on others.
 
-- `deploy/firefox-userChrome.css` hides the chrome `--kiosk` used to hide, with
-  `toolkit.legacyUserProfileCustomizations.stylesheets` to load it at all.
-- `deploy/start-kiosk.sh` launches the browser and declares its window
-  `_NET_WM_WINDOW_TYPE_SPLASH` — undecorated by definition, and still in the
-  WM's *normal* layer, which is the point. `_MOTIF_WM_HINTS` was tried first and
-  is not reliable here: xfwm4 honoured it on some launches and drew
-  "Robot Face — Mozilla Firefox" across the top of the face on others. Shifting
-  the window up to hide the frame did not work either.
-- It also kills `plank`. That dock floats above the browser and sits exactly
-  where the Wake button is, ready to eat every tap meant for it.
+It worked, and it was **backed out entirely**, for two reasons.
 
-But it costs **190px of picture** whenever a video plays, and that is most of
-what the robot's five-inch screen has.
+It cost **190px of picture** on a five-inch screen — the strip had to be that
+tall because the Wake button has to be ~9mm to be hittable.
+
+And it broke the screen. After a video stopped, the last frame stayed on the
+display with the controls still painted on it — frozen. mpv's window was gone
+and mpv was idle; the browser simply never repainted. There is no compositor
+(`xfwm4 /general/use_compositing` is `false`), so X relies on Expose events, and
+the SPLASH window did not act on them. `xrefresh` cleared the stale frame to
+white and the face still did not come back. **A blank kiosk is worse than a
+titlebar**, and design 3 does not need any of it: with the controls inside mpv,
+the browser never has to leave fullscreen. `--kiosk` is back, unchanged from
+where it started.
 
 **Design 3 — draw the controls inside mpv. Shipped.** `mpv-seek.lua` renders an
 ASS overlay: a translucent green "Wake!" circle bottom-centre, pause and stop
@@ -284,6 +290,10 @@ logic is verified end to end — tap → `joinVoice` → "mic enabled" → `list
   with what it is cancelling. Buying one does not buy a quiet room.
 - **A synthetic input is not a test of an input path.** XTEST proved the handler,
   and proved nothing about the touchscreen — which turned out not to exist.
+- **A workaround that survives testing can still be the wrong shape.** Taking
+  the browser out of fullscreen passed every check put to it, then froze the
+  screen on the one path nobody had exercised — stopping a video. It was only
+  ever scaffolding for a strip that the final design does not need.
 - **Grep for the behaviour, not for the file you are editing.** Two separate
   video-pause implementations were written and reverted in one evening because
   nobody looked for the one `app.py` already had, three functions from code that
