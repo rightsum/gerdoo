@@ -34,7 +34,7 @@ import video
 # while the handler that read it stayed — leaving /api/battery raising
 # NameError and the panel's battery bars silently blank for sixteen days.
 from battery_bridge import STATUS_FILE as BATTERY_FILE
-from camera import camera, CameraError
+from camera import camera, cameras, CameraError
 import voice
 
 
@@ -662,6 +662,11 @@ def control():
         state=load_state(),
         has_password=bool(cfg.get("password_hash")),
         camera_present=camera.status()["present"],
+        arm_cameras=[
+            {"name": name, "label": cameras[name].label.capitalize(),
+             "present": cameras[name].status()["present"]}
+            for name in ("arm_left", "arm_right")
+        ],
         facetrack_installed=face_track.unit_installed(),
         lidar_installed=lidar.unit_installed(),
     ))
@@ -695,45 +700,44 @@ def api_set_state():
 
 
 # ---- Camera (auth + password required) ----
-@app.route("/api/camera/status")
-def api_camera_status():
+# The head camera keeps its original routes — the face tracker speaks them.
+# Every camera, head included, is also reachable by name under /api/cameras/.
+def _camera_status(cam):
     guard = sensor_guard()
     if guard:
         return guard
-    return jsonify(camera.status())
+    return jsonify(cam.status())
 
 
-@app.route("/api/camera/<action>", methods=["POST"])
-def api_camera_control(action):
+def _camera_control(cam, action):
     guard = sensor_guard()
     if guard:
         return guard
     if action == "start":
         try:
-            camera.start()
+            cam.start()
         except CameraError as exc:
             return jsonify(error=str(exc)), 503
     elif action == "stop":
-        camera.stop()
+        cam.stop()
     else:
         return jsonify(error="unknown action"), 400
-    return jsonify(camera.status())
+    return jsonify(cam.status())
 
 
-@app.route("/camera/stream.mjpg")
-def camera_stream():
+def _camera_stream(cam):
     guard = sensor_guard()
     if guard:
         return guard
     try:
-        camera.start()          # idempotent; lets a reload resume the stream
+        cam.start()             # idempotent; lets a reload resume the stream
     except CameraError as exc:
         return jsonify(error=str(exc)), 503
 
     boundary = "frame"
 
     def generate():
-        for jpeg in camera.frames():
+        for jpeg in cam.frames():
             yield (
                 b"--" + boundary.encode() + b"\r\n"
                 b"Content-Type: image/jpeg\r\n"
@@ -746,6 +750,43 @@ def camera_stream():
         mimetype=f"multipart/x-mixed-replace; boundary={boundary}",
         headers={"Cache-Control": "no-cache, no-store", "X-Accel-Buffering": "no"},
     )
+
+
+@app.route("/api/camera/status")
+def api_camera_status():
+    return _camera_status(camera)
+
+
+@app.route("/api/camera/<action>", methods=["POST"])
+def api_camera_control(action):
+    return _camera_control(camera, action)
+
+
+@app.route("/camera/stream.mjpg")
+def camera_stream():
+    return _camera_stream(camera)
+
+
+def _unknown_camera():
+    return jsonify(error="unknown camera"), 404
+
+
+@app.route("/api/cameras/<name>/status")
+def api_named_camera_status(name):
+    cam = cameras.get(name)
+    return _camera_status(cam) if cam else _unknown_camera()
+
+
+@app.route("/api/cameras/<name>/<action>", methods=["POST"])
+def api_named_camera_control(name, action):
+    cam = cameras.get(name)
+    return _camera_control(cam, action) if cam else _unknown_camera()
+
+
+@app.route("/cameras/<name>/stream.mjpg")
+def named_camera_stream(name):
+    cam = cameras.get(name)
+    return _camera_stream(cam) if cam else _unknown_camera()
 
 
 # ---- LiDAR (auth + password required) ----

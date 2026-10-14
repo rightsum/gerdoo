@@ -85,6 +85,11 @@
     .hint code { background: rgba(255,255,255,0.07); padding: 1px 5px; border-radius: 5px; font-size: 12px; }
     .rangebar { display: flex; align-items: center; gap: 10px; margin-top: 12px; font-size: 12px; color: #8493b3; }
     .rangebar input { flex: 1; accent-color: #5b8cff; }
+    .armcam + .armcam { margin-top: 14px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.06); }
+    .armcam .rangebar { margin-top: 0; }
+    .armcam .rangebar > span:first-child { color: #e8ecf6; font-size: 13.5px; }
+    .armcam .stage { margin-top: 10px; }
+    .armcam .stage.off { display: none; }
     .locked { padding: 14px 16px; font-size: 13px; color: #ffe0a3;
       background: rgba(255,180,0,0.08); border-top: 1px solid rgba(255,180,0,0.2); }
   </style>
@@ -236,6 +241,32 @@
         A live video feed must not be open to your whole network.<br>
         <code>cd ~/robot-face &amp;&amp; python3 manage.py set-password &amp;&amp; systemctl --user restart robot-face</code>
       </div>
+      {% endif %}
+    </section>
+
+    <!-- ---------------- Arm cameras ---------------- -->
+    <section class="panel" id="armcam-panel">
+      <div class="panel-head">
+        <h2>Arm cameras</h2>
+      </div>
+      {% if has_password %}
+      <div class="panel-body">
+        {% for cam in arm_cameras %}
+        <div class="armcam" data-cam="{{ cam.name }}">
+          <div class="rangebar">
+            <span>{{ cam.label }}</span>
+            <span style="flex:1"></span>
+            <span class="status"><span class="led"></span><span class="armcam-text">{{ 'off' if cam.present else 'not detected' }}</span></span>
+            <button class="toggle" aria-label="Toggle {{ cam.label }}"
+                    {% if not cam.present %}disabled{% endif %}></button>
+          </div>
+          <div class="stage off"><img alt="{{ cam.label }} stream"></div>
+          <p class="hint armcam-hint"></p>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="locked">🔒 Set a control-panel password before enabling the arm cameras.</div>
       {% endif %}
     </section>
 
@@ -541,6 +572,54 @@
       if (!camOn) return;
       try { camReflect(await api('/api/camera/status')); } catch {}
     }, 5000);
+
+    // ---- Arm cameras ----
+    // One row per gripper camera, each with its own toggle and stream. Same
+    // rules as the head camera: the <img> holds a src only while on, and the
+    // status is polled because a camera can stop on its own.
+    document.querySelectorAll('.armcam').forEach((row) => {
+      const name   = row.dataset.cam;
+      const toggle = row.querySelector('.toggle');
+      const status = row.querySelector('.status');
+      const text   = row.querySelector('.armcam-text');
+      const stage  = row.querySelector('.stage');
+      const img    = row.querySelector('img');
+      const hint   = row.querySelector('.armcam-hint');
+      let on = false;
+
+      function reflect(s) {
+        on = !!s.running;
+        toggle.classList.toggle('on', on);
+        stage.classList.toggle('off', !on);
+        status.classList.toggle('on', on);
+        status.classList.toggle('err', !!s.error);
+        text.textContent = s.error ? 'error' : (on ? s.resolution : (s.present ? 'off' : 'not detected'));
+        hint.textContent = s.error ? s.error
+          : on ? s.resolution + ' · ' + s.fps_target + ' fps · stops itself after 30s unwatched'
+          : '';
+        if (on && !img.src) img.src = '/cameras/' + name + '/stream.mjpg?t=' + Date.now();
+        if (!on && img.src) img.removeAttribute('src');
+      }
+
+      toggle.addEventListener('click', async () => {
+        toggle.classList.add('busy');
+        try {
+          reflect(await api('/api/cameras/' + name + '/' + (on ? 'stop' : 'start'), 'POST'));
+          showToast(row.querySelector('.rangebar span').textContent + (on ? ' on' : ' off'));
+        } catch (e) { showToast(e.message); }
+        finally { toggle.classList.remove('busy'); }
+      });
+
+      setInterval(async () => {
+        if (!on) return;
+        try { reflect(await api('/api/cameras/' + name + '/status')); } catch {}
+      }, 5000);
+
+      // Another viewer may already have it running.
+      (async () => {
+        try { reflect(await api('/api/cameras/' + name + '/status')); } catch {}
+      })();
+    });
 
     // ---- LiDAR ----
     const lidarToggle = document.getElementById('lidar-toggle');
