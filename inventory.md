@@ -32,7 +32,11 @@ teensy console    /dev/serial/by-id/usb-Teensyduino_Dual_Serial_19627940-if00
 teensy micro-ROS  /dev/serial/by-id/usb-Teensyduino_Dual_Serial_19627940-if02
 lidar             /dev/serial/by-id/usb-Silicon_Labs_CP2102N_USB_to_UART_Bridge_Controller_ec8fc9bc95d5ef11afac704b49d2c684-if00-port0
 brio 500 camera   /dev/v4l/by-id/usb-046d_Brio_500_2437ZBD0PNK8-video-index0
+arm camera left   /dev/v4l/by-path/platform-3610000.usb-usb-0:2.1.2:1.0-video-index0
+arm camera right  /dev/v4l/by-path/platform-3610000.usb-usb-0:2.1.3:1.0-video-index0
 ```
+
+⚠️ **The arm cameras are the exception — by-path, not by-id.** Both OV9281 modules report serial `SN0001`, so `/dev/v4l/by-id/` holds one link for the pair. Their names are their **hub ports**: keep each camera in its own port, or left and right swap. See [log 027](docs/logs/027-2026-10-13-arm-cameras-on-the-panel.md).
 
 The Brio claims **two** `/dev/video*` nodes — `index1` is metadata, not capture. Use `index0`.
 
@@ -212,7 +216,7 @@ These are keyed on each device's own serial number, so they also disambiguate bo
 ### OV9281 120fps Global Shutter USB Camera (×2)
 - **Store:** GXIVISION USB Camera Factory Store
 - **Link:** https://www.aliexpress.com/item/1005008007123713.html
-- **Qty:** 2 · **Total:** €75.55 · **Status:** Pending
+- **Qty:** 2 · **Total:** €75.55 · **Status:** ✅ In service — one on each arm gripper, 640×400 MJPEG on the control panel (log 027). ⚠️ The same listing shipped two firmware builds: 2022 (`221118`, MJPEG at max fps only, dark indoors) and 2024 (`240523`, full 30–210 fps list). The left unit was reflashed to 2024 with Arducam CommonBurnerAP. Both 256 KB images are in `~/cam-firmware/` on the robot. **Check the fps list of any new unit before mounting it.**
 - **Specs:**
   - Module No.: **S1M03** (per module datasheet)
   - Sensor: OmniVision OV9281 — **1/4" CMOS**, 3.0µm × 3.0µm pixels, CSP bare die
@@ -235,7 +239,9 @@ MJPEG-only is what makes two cameras feasible: raw 720p120 mono would be ~110 MB
 
 But **throughput is not what fails.** UVC devices reserve *isochronous* bandwidth at enumeration from their **declared** endpoint size, not actual use — a camera consuming 38 Mbps often reserves 150–190 Mbps. Two of those against USB 2.0's ~384 Mbps ceiling sits at the edge, and failure appears at plug-in as `Not enough bandwidth for new device state`. Each camera works alone; the second refuses in combination.
 
-**Fix — set this before first plugging them in:**
+> ❌ **Correction 2026-10-13 — the quirk below does nothing for these cameras.** In `uvc_video.c` (5.15.148, line 200) the fix-up is guarded by `!(format->flags & UVC_FMT_FLAG_COMPRESSED)`, so it only applies to **uncompressed** formats. These cameras are MJPEG-only. What works instead is measured in [log 027](docs/logs/027-2026-10-13-arm-cameras-on-the-panel.md): arms at **640×400** run alongside the Brio in any order. Any arm at 720p together with the Brio fails with `No space left on device`.
+
+~~**Fix — set this before first plugging them in:**~~
 
 ```bash
 echo "options uvcvideo quirks=128" | sudo tee /etc/modprobe.d/uvcvideo.conf
@@ -872,6 +878,27 @@ Silicone wire ampacity (conservative, chassis): 14 AWG ≈ 30 A · 16 AWG ≈ 22
 Also fit a **main disconnect** per pack — one action that kills everything. Deans T-plugs work if they are reachable.
 
 ---
+
+### 🦾 Arms — ElRobot followers, bus wiring per arm
+
+Two [ElRobot](https://github.com/norma-core/norma-core/tree/main/hardware/elrobot) **follower** arms. Each has 8× STS3215 12V (30 kg·cm), 7+1 DOF, **servo IDs 1–8 from base to gripper**, at 1 Mbaud. ElRobot's own BOM gives one Waveshare **Bus Servo Adapter (A)** and one 12V/4A supply per arm.
+
+```
+pack (+) ──[15 A fuse]── 16 AWG ──► adapter DC in (5.5×2.1 jack or screw terminal)
+pack (−) ──── star ground ────────► adapter GND
+Jetson USB hub ◄── USB-C data ──── adapter   (jumper on B = USB)
+adapter servo port ──► S1 base ─ S2 ─ … ─ S8 gripper
+```
+
+- **One adapter per arm.** Each arm is then its own bus, so both can use IDs 1–8, and neither arm's current runs through the other's board.
+- **Jumper on B.** Per Waveshare: B is USB control, A is an external MCU's UART.
+- **Adapter input is 9–12.6 V.** A full 3S pack is exactly 12.6 V. **Never 4S.**
+- **First power-up on a bench supply** with a current limit around 3 A.
+- **Factory servos all ship as ID 1, and a chain of them collides.** To set IDs on an already-chained arm, work from the base:
+  1. Unplug S1→S2 and set S1 to a temporary 9.
+  2. Replug, unplug the next link, and set the lone ID-1 servo to its number.
+  3. Repeat down the arm, then set 9 back to 1.
+- **USB names:** use `/dev/serial/by-id/`, and check that the two adapters' serials actually differ. The two arm cameras shipped with identical serials (log 027).
 
 ### 🦾 Arm power — daisy-chain limits
 
@@ -1773,7 +1800,7 @@ Things that need a meter or a look at the physical part, not a datasheet.
 | 5 | **HC-SR04 board revision** | Listing says 5V; the Handson guide covers a 3.3–5V V2.0 board. Measure ECHO idle-high before wiring |
 | ~~6~~ | ~~RPLIDAR C1 TX level~~ | ❌ **DELETED 2026-08-04** — lidar is on Jetson USB and never touches a Teensy pin |
 | 7 | **Screen power draw** | Meter the panel's **own** supply. A prior session measured ~5.9W *total Jetson board* power running the face, but the panel is fed separately so it likely sits outside that figure |
-| 8 | **Camera enumeration** | Set `uvcvideo quirks=128` **first**, then plug both OV9281s in and check `dmesg` for `Not enough bandwidth`. See Vision & Cameras |
+| ~~8~~ | ~~Camera enumeration~~ | ✅ **Done 2026-10-13** — both OV9281s enumerate. `quirks=128` turned out to be irrelevant for MJPEG, so the arms run at 640×400 instead. See log 027 |
 | 9 | **36GP-555 stall current** | Not recorded here — the one hole in the power budget, exactly where the drive base sits. Sets the drive-motor fuse (20A is provisional) |
 | 10 | **Which 5.5" panel is fitted** | The AM-OLED is listed *Pending* and the IPS as *BROKEN*. Touch does not enumerate at all — if the fitted panel is the broken IPS, that is the explanation. See Displays |
 

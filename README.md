@@ -20,7 +20,7 @@ I've been building things since my teenage years, when I sold my first piece of 
 - **Sets the mood.** Ambient LED strip lighting, dimmable from the Teensy.
 - **Has a split brain.** Jetson Orin Nano runs ROS 2, planning, vision and AI. Teensy 4.1 on micro-ROS handles the motors, servos and encoders in real time.
 - **Plays video.** Say a title or paste a link and it plays on the kiosk screen, `mpv` driven over its own IPC socket; a call in progress takes priority and the video picks back up where it left off.
-- **Keeps a lab notebook.** 19 logged write-ups of problems, wrong turns, root causes and fixes, in [`docs/logs/`](docs/logs/)
+- **Keeps a lab notebook.** 21 logged write-ups of problems, wrong turns, root causes and fixes, in [`docs/logs/`](docs/logs/)
 
 Everything below is working documentation, written for me and for the agents helping me build this as much as for you.
 

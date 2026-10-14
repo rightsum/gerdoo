@@ -156,6 +156,8 @@ Each camera enumerates fine alone; the second refuses in combination.
 
 ### The fix — `UVC_QUIRK_FIX_BANDWIDTH`
 
+> ❌ **Correction (2026-10-13, [log 027](027-2026-10-13-arm-cameras-on-the-panel.md)):** this quirk does not apply to these cameras. The kernel guards it with `!(format->flags & UVC_FMT_FLAG_COMPRESSED)`, so it never touches an MJPEG stream. What actually worked was the 640×400 step-down.
+
 Verified present on this kernel: `uvcvideo` 1.1.1, `/lib/modules/5.15.148-tegra/`, exposes `quirks` (currently `4294967295` = `-1` = not overridden).
 
 ```bash
