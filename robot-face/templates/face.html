@@ -258,6 +258,19 @@
     // wakes apply(), apply calls this) and the Wake button (calls this
     // directly, which POSTs /api/voice/wake, which sets `connecting`, which
     // comes back over SSE and calls this AGAIN).
+    //
+    // 2026-10-09: the guard itself was the outage. room.disconnect() on a
+    // half-dead connection never settled, so `joining` stayed true forever
+    // and every later wake was silently ignored — the robot sat deaf for
+    // 20 days while the wake word fired and gave up. Every await that can
+    // wedge the session now runs under `limit` (module scope, below), so
+    // joinVoice always reaches its `finally` and clears the guard.
+    // See docs/logs/026.
+    const limit = (p, ms, what) => Promise.race([
+      p,
+      new Promise((_, rej) => setTimeout(() => rej(new Error(what + ' timed out after ' + ms + 'ms')), ms)),
+    ]);
+
     let joining = false;
 
     async function joinVoice() {
@@ -272,7 +285,7 @@
       }
       joining = true;
       try {
-        const res = await fetch('/api/voice/wake', { method: 'POST' });
+        const res = await limit(fetch('/api/voice/wake', { method: 'POST' }), 10000, 'wake token fetch');
         const { url, token } = await res.json();
 
         room = new LivekitClient.Room({
@@ -322,11 +335,6 @@
           report('idle');
         });
 
-        const limit = (p, ms, what) => Promise.race([
-          p,
-          new Promise((_, rej) => setTimeout(() => rej(new Error(what + ' timed out after ' + ms + 'ms')), ms)),
-        ]);
-
         jslog(`connecting to ${url}`);
         await limit(room.connect(url, token), 15000, 'room.connect');
         jslog('connected; enabling mic');
@@ -334,7 +342,7 @@
         jslog('mic enabled');
         report('listening');
       } catch (e) {
-        if (room) { try { await room.disconnect(); } catch {} }
+        if (room) { try { await limit(room.disconnect(), 5000, 'disconnect'); } catch {} }
         room = null;
         jslog(`joinVoice FAILED: ${(e && e.message) || e}`);
         report('error', String((e && e.message) || e));
@@ -350,7 +358,7 @@
 
     async function leaveVoice() {
       if (!room) return;
-      try { await room.disconnect(); } catch {}
+      try { await limit(room.disconnect(), 5000, 'disconnect'); } catch {}
       room = null;
       audioSink.replaceChildren();
     }
