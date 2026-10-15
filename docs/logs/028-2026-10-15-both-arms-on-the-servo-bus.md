@@ -9,6 +9,11 @@
 
 ---
 
+![Gerdoo on 2026-10-15: both ElRobot arms mounted and wired, the face on its screen, the lidar behind it](../images/2026-10-15-both-arms.jpg)
+
+*History note, 2026-10-15: the evening both arms first answered with unique
+IDs and moved from the control panel.*
+
 ## Context
 
 Two ElRobot follower arms (8× STS3215 12 V each) are chained servo to servo.
