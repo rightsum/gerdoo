@@ -12,12 +12,12 @@
 #   make ports     - show what is detected and in which USB mode
 #   make clean
 #
-# Three things this file works around, all learned the hard way:
+# Three things this file works around, all learned the hard way — see docs/logs/003:
 #   1. usb=serial must be pinned in the FQBN or the board can land in RawHID,
 #      where no /dev/ttyACM* can ever appear.
 #   2. Flashing uses teensy_loader_cli, NOT arduino-cli upload. arduino-cli
 #      delegates to teensy_post_compile, which does not flash — it messages the
-#      Teensy Loader GUI, which is GTK and dies headless.
+#      Teensy Loader GUI, which is GTK and dies headless. See docs/logs/005.
 #   3. /dev/ttyACM<N> is NOT stable — observed moving 0 -> 1 -> 0 with nothing
 #      unplugged. Always address the board by its by-id serial-number symlink.
 
@@ -55,10 +55,25 @@ compile:
 # installed (/etc/udev/rules.d/00-teensy.rules) — without them the bootloader
 # is root-only and this silently waits forever.
 # -w waits for the board to appear; the timeout stops that becoming a hang.
+# 4. teensy_loader_cli -s cannot work with usb=serial2. The soft reboot is sent
+#    over HID, and Dual Serial (PID 048b) exposes two CDC interfaces and NO HID
+#    interface — so -s prints "Error opening USB device: No error" and waits
+#    forever. Opening the primary CDC at 134 baud is the Teensy core's own
+#    bootloader trigger and needs no HID. B134 is a standard POSIX baud, so
+#    stty does it — no pyserial, which is not installed system-wide here.
+# 5. micro-ros-agent.service holds if02 open and blocks the reboot. Stop it
+#    first; the caller is responsible for starting it again.
 upload: compile
 	@test -f $(HEX) || { echo "No hex at $(HEX)"; exit 1; }
+	@test -n "$(PORT)" || { echo "No serial port. Run 'make ports'."; exit 1; }
+	@echo "=== Stopping micro-ros-agent (holds the port open) ==="
+	-systemctl --user stop micro-ros-agent.service
+	@echo "=== Rebooting into HalfKay via 134 baud ==="
+	-stty -F $(PORT) 134
+	@sleep 2
+	@lsusb | grep -q 16c0:0478 || { echo "Board did not enter the bootloader"; exit 1; }
 	@echo "=== Flashing $(notdir $(HEX)) ==="
-	timeout 90 $(TLOADER) --mcu=$(MCU) -w -s -v $(HEX)
+	timeout 45 $(TLOADER) --mcu=$(MCU) -w -v $(HEX)
 	@echo "=== Waiting for re-enumeration ==="
 	@sleep 6
 	@$(MAKE) --no-print-directory ports
