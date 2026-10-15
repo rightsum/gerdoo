@@ -155,3 +155,59 @@ def servo_set(pan=None, tilt=None):
     if line is None:
         raise TeensyError("no reply from the Teensy")
     return parse_servo(line), line
+
+
+# ---- Arms (STS3215 bus servos through the Teensy: L = IDs 1-8, R = 11-18) ----
+
+_ARM_COLS = re.compile(r"\b(pos|load|temp)=(-?\d+(?:,-?\d+)*)")
+_ARM_STATE = re.compile(r"^ARM ([LR]) STATE ")
+
+
+def parse_arm_state(line):
+    """
+    "ARM L STATE torque=1 speed=400 pos=a,b,... load=... temp=..." -> dict.
+
+    None for anything else. A joint that did not answer reads -1 in every column.
+    """
+    m = _ARM_STATE.match(line or "")
+    if not m:
+        return None
+    torque = re.search(r"\btorque=(\d)", line)
+    speed = re.search(r"\bspeed=(\d+)", line)
+    cols = {k: [int(x) for x in v.split(",")] for k, v in _ARM_COLS.findall(line)}
+    return {
+        "side": m.group(1),
+        "torque": bool(torque and torque.group(1) == "1"),
+        "speed": int(speed.group(1)) if speed else None,
+        "pos": cols.get("pos", []),
+        "load": cols.get("load", []),
+        "temp": cols.get("temp", []),
+    }
+
+
+def _arm(side, cmd, reply_prefix, timeout=TIMEOUT_S):
+    prefix = f"ARM {side} {reply_prefix}"
+    line = send(f"ARM {side} {cmd}", lambda l: l.startswith(prefix), timeout=timeout)
+    if line is None:
+        raise TeensyError("no reply from the Teensy")
+    return line
+
+
+def arm_state(side):
+    line = _arm(side, "STATE", "STATE ")
+    return parse_arm_state(line), line
+
+
+def arm_torque(side, on):
+    """Enable (goal = present position first, so nothing jumps) or release."""
+    return _arm(side, "TORQUE " + ("ON" if on else "OFF"), "TORQUE ", timeout=3)
+
+
+def arm_speed(side, steps_per_s):
+    """Goal speed for that arm's later moves, in steps/s. The firmware clamps 50-3000."""
+    return int(_arm(side, f"SPEED {int(steps_per_s)}", "SPEED ").split()[3])
+
+
+def arm_move(side, joint, pos):
+    """Returns the firmware's reply; it ends in " ok" only if the write landed."""
+    return _arm(side, f"MOVE {int(joint)} {int(pos)}", "MOVE ")

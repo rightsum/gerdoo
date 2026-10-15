@@ -917,6 +917,89 @@ def api_servo_set():
     return jsonify({"pan": pan, "tilt": tilt, "raw": raw})
 
 
+# ---- Arms (auth + password required: they move) ----
+# Same bar as the cameras, not the neck: eight 30 kg-cm servos per arm are not
+# something to hand to anyone on the LAN when no password is set.
+ARM_SIDES = {"left": "L", "right": "R"}
+
+
+def _arm_side(name):
+    side = ARM_SIDES.get(name)
+    if side is None:
+        return None, (jsonify(error="unknown arm"), 404)
+    guard = sensor_guard()
+    return side, guard
+
+
+@app.route("/api/arm/<name>")
+def api_arm_state(name):
+    side, refusal = _arm_side(name)
+    if refusal:
+        return refusal
+    try:
+        state, _ = teensy.arm_state(side)
+    except teensy.TeensyError as e:
+        return jsonify(error=str(e)), 503
+    return jsonify(state)
+
+
+@app.route("/api/arm/<name>/torque", methods=["POST"])
+def api_arm_torque(name):
+    side, refusal = _arm_side(name)
+    if refusal:
+        return refusal
+    data = request.get_json(silent=True) or {}
+    if "on" not in data:
+        return jsonify(error="body must be {\"on\": true|false}"), 400
+    try:
+        line = teensy.arm_torque(side, bool(data["on"]))
+    except teensy.TeensyError as e:
+        return jsonify(error=str(e)), 503
+    if "refused" in line:
+        return jsonify(error=line), 409
+    return jsonify(ok=True, reply=line)
+
+
+@app.route("/api/arm/<name>/speed", methods=["POST"])
+def api_arm_speed(name):
+    side, refusal = _arm_side(name)
+    if refusal:
+        return refusal
+    data = request.get_json(silent=True) or {}
+    try:
+        speed = int(data["speed"])
+    except (KeyError, TypeError, ValueError):
+        return jsonify(error="body must be {\"speed\": 50-3000}"), 400
+    if not 50 <= speed <= 3000:
+        return jsonify(error="speed must be 50-3000 steps/s"), 400
+    try:
+        speed = teensy.arm_speed(side, speed)
+    except teensy.TeensyError as e:
+        return jsonify(error=str(e)), 503
+    return jsonify(ok=True, speed=speed)
+
+
+@app.route("/api/arm/<name>/move", methods=["POST"])
+def api_arm_move(name):
+    side, refusal = _arm_side(name)
+    if refusal:
+        return refusal
+    data = request.get_json(silent=True) or {}
+    try:
+        joint, pos = int(data["joint"]), int(data["pos"])
+    except (KeyError, TypeError, ValueError):
+        return jsonify(error="body must be {\"joint\": 1-8, \"pos\": 0-4095}"), 400
+    if not (1 <= joint <= 8 and 0 <= pos <= 4095):
+        return jsonify(error="joint must be 1-8 and pos 0-4095"), 400
+    try:
+        line = teensy.arm_move(side, joint, pos)
+    except teensy.TeensyError as e:
+        return jsonify(error=str(e)), 503
+    if not line.endswith(" ok"):
+        return jsonify(error=line), 409
+    return jsonify(ok=True, joint=joint, pos=pos)
+
+
 # ---- Speaker volume ----
 
 @app.route("/api/audio")
