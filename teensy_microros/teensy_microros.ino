@@ -47,6 +47,7 @@
   state, which is the whole point of Dual Serial.
 */
 
+#include "arm_types.h"
 #include <micro_ros_arduino.h>
 
 #include <stdio.h>
@@ -452,6 +453,416 @@ void sendLight() {
   Serial.println();
 }
 
+// ---------------------------------------------------------------------------
+// Arm servo bus — Feetech STS3215 through the Waveshare driver board
+// ---------------------------------------------------------------------------
+// READ-ONLY. BUS SCAN sends PING (0x01) and READ (0x02) packets and nothing
+// else: no WRITE, no SYNC_WRITE, no torque enable, no RESET. A servo answers
+// a ping or a read without moving.
+//
+// Wiring: Teensy SerialN TX/RX to the board's UART header, board jumper on A
+// (UART mode), grounds common. The board turns the two-wire UART into the
+// servos' one-wire bus. The port is opened on the first scan, not at boot, so
+// nothing drives its pins until asked to. Serial3 is not offered: its RX is
+// pin 15, the light sensor.
+
+const uint32_t BUS_BAUD = 1000000;           // ElRobot / Feetech factory default
+const uint8_t  STS_PING = 0x01, STS_READ = 0x02;
+const uint8_t  STS_REG_MODEL = 3;            // u16
+const uint8_t  STS_REG_TORQUE_ENABLE = 40;   // u8
+const uint8_t  STS_REG_PRESENT = 56;         // position u16, speed u16, load u16, volt u8 (0.1 V), temp u8
+const uint32_t BUS_REPLY_US = 2000;
+bool busOpened[9] = {false};
+uint32_t busRxBytes = 0;     // every byte seen during a scan, echoes included
+
+HardwareSerial *busPort(int n) {
+  switch (n) {
+    case 1: return &Serial1;
+    case 2: return &Serial2;
+    case 7: return &Serial7;
+    case 8: return &Serial8;
+  }
+  return nullptr;
+}
+
+// Find a valid status packet from `id` in buf. The board's one-wire bus can
+// echo our own request back on RX, so an exact copy of it at the start is
+// skipped. Returns the parameter count, -1 if nothing valid yet, and sets
+// *garbled when bytes arrived that do not form a valid reply — what two
+// servos with the same ID answering at once looks like.
+int busParse(const uint8_t *buf, uint8_t n, const uint8_t *req, uint8_t reqLen, uint8_t id,
+             uint8_t *out, uint8_t outMax, uint8_t *err, bool *garbled) {
+  uint8_t i = (n >= reqLen && memcmp(buf, req, reqLen) == 0) ? reqLen : 0;
+  *garbled = n > i;
+  for (; i + 4 <= n; i++) {
+    if (buf[i] != 0xFF || buf[i + 1] != 0xFF || buf[i + 2] != id) continue;
+    uint8_t len = buf[i + 3];
+    if (len < 2 || i + 4 + len > n) return -1;
+    uint8_t sum = 0;
+    for (uint8_t k = i + 2; k <= i + 2 + len; k++) sum += buf[k];
+    if ((uint8_t)~sum != buf[i + 3 + len]) continue;
+    *err = buf[i + 4];
+    uint8_t m = min((uint8_t)(len - 2), outMax);
+    memcpy(out, buf + i + 5, m);
+    *garbled = false;
+    return m;
+  }
+  return -1;
+}
+
+// One request and its reply. Returns the reply's parameter count, or -1.
+int busTransact(HardwareSerial &s, uint8_t id, uint8_t instr, const uint8_t *params, uint8_t np,
+                uint8_t *out, uint8_t outMax, uint8_t *err, bool *garbled) {
+  uint8_t req[16];          // header 5 + up to 10 params + checksum
+  uint8_t len = np + 2, sum = id + len + instr;
+  req[0] = 0xFF; req[1] = 0xFF; req[2] = id; req[3] = len; req[4] = instr;
+  for (uint8_t i = 0; i < np; i++) { req[5 + i] = params[i]; sum += params[i]; }
+  req[5 + np] = ~sum;
+  uint8_t reqLen = 6 + np;
+
+  while (s.available()) s.read();
+  s.write(req, reqLen);
+  s.flush();
+
+  uint8_t buf[64];
+  uint8_t n = 0;
+  int got = -1;
+  *garbled = false;
+  elapsedMicros t;
+  while (t < BUS_REPLY_US && n < sizeof(buf)) {
+    if (!s.available()) continue;
+    buf[n++] = s.read();
+    busRxBytes++;
+    got = busParse(buf, n, req, reqLen, id, out, outMax, err, garbled);
+    if (got >= 0) return got;
+  }
+  if (n > 0) busParse(buf, n, req, reqLen, id, out, outMax, err, garbled);
+  return got;
+}
+
+void busScan(int portNum) {
+  HardwareSerial *s = busPort(portNum);
+  if (!s) {
+    Serial.println("ERR bus_port (use 1, 2, 7 or 8)");
+    return;
+  }
+  if (!busOpened[portNum]) {
+    s->begin(BUS_BAUD);
+    busOpened[portNum] = true;
+  }
+  Serial.print("BUS SCAN port=Serial");  Serial.print(portNum);
+  Serial.print(" baud=");                Serial.print(BUS_BAUD);
+  Serial.println(" (ping + read only)");
+
+  uint8_t found[253], nFound = 0;
+  busRxBytes = 0;
+  uint8_t out[8], err;
+  bool garbled;
+  for (int id = 0; id <= 252; id++) {
+    if (busTransact(*s, id, STS_PING, nullptr, 0, out, sizeof(out), &err, &garbled) >= 0) {
+      found[nFound++] = id;
+    } else if (garbled) {
+      Serial.print("BUS id=");  Serial.print(id);
+      Serial.println(" garbled reply (two servos sharing this ID?)");
+    }
+  }
+
+  for (uint8_t k = 0; k < nFound; k++) {
+    uint8_t id = found[k];
+    uint8_t model[2] = {0, 0}, torque[1] = {0}, present[8] = {0};
+    const uint8_t qModel[2] = {STS_REG_MODEL, 2};
+    const uint8_t qTorque[2] = {STS_REG_TORQUE_ENABLE, 1};
+    const uint8_t qPresent[2] = {STS_REG_PRESENT, 8};
+    bool okModel = busTransact(*s, id, STS_READ, qModel, 2, model, 2, &err, &garbled) == 2;
+    bool okTorque = busTransact(*s, id, STS_READ, qTorque, 2, torque, 1, &err, &garbled) == 1;
+    bool okPresent = busTransact(*s, id, STS_READ, qPresent, 2, present, 8, &err, &garbled) == 8;
+    Serial.print("BUS id=");  Serial.print(id);
+    if (okModel) { Serial.print(" model=");  Serial.print(model[0] | (model[1] << 8)); }
+    if (okPresent) {
+      Serial.print(" pos=");    Serial.print(present[0] | (present[1] << 8));
+      Serial.print(" volt=");   Serial.print(present[6] / 10.0, 1);
+      Serial.print(" temp=");   Serial.print(present[7]);
+    }
+    if (okTorque) { Serial.print(" torque=");  Serial.print(torque[0]); }
+    Serial.print(" err=0x");  Serial.println(err, HEX);
+  }
+
+  // rx_bytes=0 means nothing reached RX at all: wiring, jumper or power,
+  // not the servos.
+  Serial.print("BUS SCAN done rx_bytes=");  Serial.print(busRxBytes);
+  Serial.print(" found=");  Serial.print(nFound);
+  Serial.print(" ids=");
+  for (uint8_t k = 0; k < nFound; k++) {
+    if (k) Serial.print(",");
+    Serial.print(found[k]);
+  }
+  Serial.println();
+}
+
+// Debug: one READ to one ID, then every byte that comes back, raw. Read-only.
+void busReadRaw(int portNum, int id, int addr, int len) {
+  HardwareSerial *s = busPort(portNum);
+  if (!s || id < 0 || id > 252 || addr < 0 || addr > 255 || len < 1 || len > 32) {
+    Serial.println("ERR usage: BUS READ <id> <addr> <len>  (port 7)");
+    return;
+  }
+  if (!busOpened[portNum]) {
+    s->begin(BUS_BAUD);
+    busOpened[portNum] = true;
+  }
+  uint8_t req[8] = {0xFF, 0xFF, (uint8_t)id, 4, STS_READ, (uint8_t)addr, (uint8_t)len, 0};
+  req[7] = ~(uint8_t)(req[2] + req[3] + req[4] + req[5] + req[6]);
+  while (s->available()) s->read();
+  s->write(req, 8);
+  s->flush();
+  uint8_t buf[64];
+  uint8_t n = 0;
+  elapsedMicros t;
+  while (t < 5000 && n < sizeof(buf)) {
+    if (s->available()) buf[n++] = s->read();
+  }
+  Serial.print("BUS RAW id=");  Serial.print(id);
+  Serial.print(" addr=");       Serial.print(addr);
+  Serial.print(" len=");        Serial.print(len);
+  Serial.print(" got=");        Serial.print(n);
+  Serial.print(" :");
+  for (uint8_t i = 0; i < n; i++) {
+    Serial.print(buf[i] < 16 ? " 0" : " ");
+    Serial.print(buf[i], HEX);
+  }
+  Serial.println();
+}
+
+// Change one servo's ID. The only write in this file. It touches the EEPROM
+// lock (55) and the ID register (5) and nothing else, so torque stays off and
+// nothing moves. Refuses unless exactly one servo answers at `from` (five
+// clean position reads in a row; two servos with one ID garble their replies)
+// and nothing answers at `to`.
+const uint8_t STS_WRITE = 0x03, STS_REG_ID = 5, STS_REG_LOCK = 55;
+
+bool busOnlyOne(HardwareSerial &s, uint8_t id) {
+  const uint8_t q[2] = {STS_REG_PRESENT, 2};
+  uint8_t out[2], err;
+  bool garbled;
+  for (int i = 0; i < 5; i++) {
+    if (busTransact(s, id, STS_READ, q, 2, out, 2, &err, &garbled) != 2) return false;
+  }
+  return true;
+}
+
+void busSetId(int portNum, int from, int to) {
+  HardwareSerial *s = busPort(portNum);
+  if (!s || from < 0 || from > 252 || to < 1 || to > 252 || from == to) {
+    Serial.println("ERR usage: BUS SETID <from> <to>  (to = 1..252, port 7)");
+    return;
+  }
+  if (!busOpened[portNum]) {
+    s->begin(BUS_BAUD);
+    busOpened[portNum] = true;
+  }
+  uint8_t out[2], err;
+  bool garbled;
+  if (busTransact(*s, to, STS_PING, nullptr, 0, out, 2, &err, &garbled) >= 0 || garbled) {
+    Serial.print("BUS SETID refused: something already answers at id=");  Serial.println(to);
+    return;
+  }
+  if (!busOnlyOne(*s, from)) {
+    Serial.print("BUS SETID refused: id=");  Serial.print(from);
+    Serial.println(" is missing or shared by more than one servo; isolate one servo first");
+    return;
+  }
+  const uint8_t unlock[2] = {STS_REG_LOCK, 0};
+  const uint8_t setId[2] = {STS_REG_ID, (uint8_t)to};
+  const uint8_t lock[2] = {STS_REG_LOCK, 1};
+  busTransact(*s, from, STS_WRITE, unlock, 2, out, 2, &err, &garbled);
+  busTransact(*s, from, STS_WRITE, setId, 2, out, 2, &err, &garbled);
+  delay(20);
+  busTransact(*s, to, STS_WRITE, lock, 2, out, 2, &err, &garbled);
+  delay(20);
+
+  const uint8_t qId[2] = {STS_REG_ID, 1};
+  uint8_t idNow[1] = {0};
+  bool ok = busTransact(*s, to, STS_READ, qId, 2, idNow, 1, &err, &garbled) == 1 && idNow[0] == to;
+  bool oldGone = busTransact(*s, from, STS_PING, nullptr, 0, out, 2, &err, &garbled) < 0 && !garbled;
+  Serial.print(ok && oldGone ? "BUS SETID ok " : "BUS SETID FAILED ");
+  Serial.print(from);  Serial.print(" -> ");  Serial.print(to);
+  Serial.print(" (reads back id=");  Serial.print(idNow[0]);
+  Serial.print(", old id ");  Serial.print(oldGone ? "silent" : "STILL ANSWERS");
+  Serial.println(")");
+}
+
+// ---------------------------------------------------------------------------
+// Arms — position control for the control panel
+// ---------------------------------------------------------------------------
+// Two ElRobot followers on one bus: L = IDs 1..8, R = IDs 11..18, base to
+// gripper. Commands are "ARM <L|R> STATE | TORQUE ON | TORQUE OFF |
+// SPEED <n> | MOVE <joint 1-8> <pos 0-4095>". Guard rails, all in place
+// before any torque:
+//   * MOVE is refused while that arm's torque is off.
+//   * TORQUE ON sets each joint's goal to its present position BEFORE
+//     enabling it, so switching on never makes a joint jump.
+//   * Torque limit 300/1000 — ElRobot's own value while it explores a joint's
+//     range — so a joint driven into a hard stop stalls instead of forcing it.
+//   * Speed starts at 400 steps/s (about 35 deg/s), acceleration 50. SPEED
+//     changes it (50-3000; the STS3215 tops out near 3000 steps/s, about
+//     270 deg/s, at 12 V).
+// TORQUE OFF releases all eight joints of that arm: the panel's emergency stop.
+
+const uint8_t  ARM_PORT = 7, ARM_JOINTS = 8;
+const uint8_t  STS_REG_ACC = 41, STS_REG_TORQUE_LIMIT = 48;   // goal block starts at ACC
+const uint16_t ARM_TORQUE_LIMIT = 300;
+const uint8_t  ARM_ACC = 50;
+
+Arm arms[2] = {{'L', 1, false, 400}, {'R', 11, false, 400}};
+
+Arm *armBySide(char c) {
+  if (c == 'L') return &arms[0];
+  if (c == 'R') return &arms[1];
+  return nullptr;
+}
+
+HardwareSerial *armBus() {
+  HardwareSerial *s = busPort(ARM_PORT);
+  if (!busOpened[ARM_PORT]) {
+    s->begin(BUS_BAUD);
+    busOpened[ARM_PORT] = true;
+  }
+  return s;
+}
+
+bool busWrite(HardwareSerial &s, uint8_t id, const uint8_t *params, uint8_t np) {
+  uint8_t out[2], err;
+  bool garbled;
+  return busTransact(s, id, STS_WRITE, params, np, out, 2, &err, &garbled) >= 0;
+}
+
+int armReadPos(HardwareSerial &s, uint8_t id) {
+  const uint8_t q[2] = {STS_REG_PRESENT, 2};
+  uint8_t out[2], err;
+  bool garbled;
+  if (busTransact(s, id, STS_READ, q, 2, out, 2, &err, &garbled) != 2) return -1;
+  return out[0] | (out[1] << 8);
+}
+
+// Acceleration, goal position, goal time 0, goal speed — one write, as the
+// Feetech SDK's WritePosEx does it.
+bool armWriteGoal(HardwareSerial &s, uint8_t id, int pos, uint16_t speed) {
+  pos = constrain(pos, 0, 4095);
+  const uint8_t p[8] = {STS_REG_ACC, ARM_ACC, (uint8_t)(pos & 0xFF), (uint8_t)(pos >> 8),
+                        0, 0, (uint8_t)(speed & 0xFF), (uint8_t)(speed >> 8)};
+  return busWrite(s, id, p, 8);
+}
+
+bool armSetTorque(HardwareSerial &s, uint8_t id, bool on) {
+  const uint8_t p[2] = {STS_REG_TORQUE_ENABLE, (uint8_t)(on ? 1 : 0)};
+  return busWrite(s, id, p, 2);
+}
+
+void armState(Arm &a) {
+  HardwareSerial &s = *armBus();
+  int pos[ARM_JOINTS], load[ARM_JOINTS], temp[ARM_JOINTS];
+  uint8_t torqued = 0;
+  for (uint8_t j = 0; j < ARM_JOINTS; j++) {
+    // Torque as the servos report it, not as this firmware remembers it: a
+    // reboot or reflash forgets, while the servos keep holding.
+    const uint8_t qt[2] = {STS_REG_TORQUE_ENABLE, 1};
+    uint8_t te[1] = {0}, terr;
+    bool tg;
+    if (busTransact(s, a.firstId + j, STS_READ, qt, 2, te, 1, &terr, &tg) == 1 && te[0]) torqued++;
+    const uint8_t q[2] = {STS_REG_PRESENT, 8};
+    uint8_t out[8], err;
+    bool garbled;
+    if (busTransact(s, a.firstId + j, STS_READ, q, 2, out, 8, &err, &garbled) == 8) {
+      pos[j] = out[0] | (out[1] << 8);
+      load[j] = ((out[4] | (out[5] << 8)) & 0x3FF) / 10;   // magnitude, percent
+      temp[j] = out[7];
+    } else {
+      pos[j] = load[j] = temp[j] = -1;
+    }
+  }
+  a.torque = torqued == ARM_JOINTS;
+  Serial.print("ARM ");  Serial.print(a.side);
+  Serial.print(" STATE torque=");  Serial.print(a.torque ? 1 : 0);
+  Serial.print(" speed=");         Serial.print(a.speed);
+  const char *names[3] = {" pos=", " load=", " temp="};
+  int *cols[3] = {pos, load, temp};
+  for (uint8_t c = 0; c < 3; c++) {
+    Serial.print(names[c]);
+    for (uint8_t j = 0; j < ARM_JOINTS; j++) {
+      if (j) Serial.print(",");
+      Serial.print(cols[c][j]);
+    }
+  }
+  Serial.println();
+}
+
+void armTorqueCmd(Arm &a, bool on) {
+  HardwareSerial &s = *armBus();
+  Serial.print("ARM ");  Serial.print(a.side);
+  if (!on) {
+    uint8_t ok = 0;
+    for (uint8_t j = 0; j < ARM_JOINTS; j++) ok += armSetTorque(s, a.firstId + j, false);
+    a.torque = false;
+    Serial.print(" TORQUE off ok=");  Serial.println(ok);
+    return;
+  }
+  // Every joint must answer before any of them gets torque.
+  int pos[ARM_JOINTS];
+  for (uint8_t j = 0; j < ARM_JOINTS; j++) {
+    pos[j] = armReadPos(s, a.firstId + j);
+    if (pos[j] < 0) {
+      Serial.print(" TORQUE refused: id=");  Serial.print(a.firstId + j);
+      Serial.println(" did not answer");
+      return;
+    }
+  }
+  const uint8_t lim[3] = {STS_REG_TORQUE_LIMIT, (uint8_t)(ARM_TORQUE_LIMIT & 0xFF),
+                          (uint8_t)(ARM_TORQUE_LIMIT >> 8)};
+  uint8_t ok = 0;
+  for (uint8_t j = 0; j < ARM_JOINTS; j++) {
+    uint8_t id = a.firstId + j;
+    if (busWrite(s, id, lim, 3) && armWriteGoal(s, id, pos[j], a.speed) && armSetTorque(s, id, true)) ok++;
+  }
+  a.torque = true;
+  Serial.print(" TORQUE on ok=");  Serial.println(ok);
+}
+
+void armMove(Arm &a, int joint, int pos) {
+  Serial.print("ARM ");  Serial.print(a.side);
+  if (!a.torque) {
+    Serial.println(" MOVE refused: torque is off");
+    return;
+  }
+  if (joint < 1 || joint > ARM_JOINTS || pos < 0 || pos > 4095) {
+    Serial.println(" MOVE refused: usage MOVE <joint 1-8> <pos 0-4095>");
+    return;
+  }
+  bool ok = armWriteGoal(*armBus(), a.firstId + joint - 1, pos, a.speed);
+  Serial.print(" MOVE joint=");  Serial.print(joint);
+  Serial.print(" goal=");        Serial.print(pos);
+  Serial.println(ok ? " ok" : " failed");
+}
+
+void armCommand(Arm &a, const char *rest) {
+  if (strcmp(rest, "STATE") == 0) {
+    armState(a);
+  } else if (strcmp(rest, "TORQUE ON") == 0) {
+    armTorqueCmd(a, true);
+  } else if (strcmp(rest, "TORQUE OFF") == 0) {
+    armTorqueCmd(a, false);
+  } else if (strncmp(rest, "SPEED ", 6) == 0) {
+    a.speed = constrain(atoi(rest + 6), 50, 3000);
+    Serial.print("ARM ");  Serial.print(a.side);
+    Serial.print(" SPEED ");  Serial.println(a.speed);
+  } else if (strncmp(rest, "MOVE ", 5) == 0) {
+    int joint = -1, pos = -1;
+    sscanf(rest + 5, "%d %d", &joint, &pos);
+    armMove(a, joint, pos);
+  } else {
+    Serial.print("ERR arm_command ");  Serial.println(rest);
+  }
+}
+
 void handleCommand(char *cmd) {
   size_t n = strlen(cmd);
   while (n > 0 && (cmd[n - 1] == '\r' || cmd[n - 1] == ' ')) cmd[--n] = '\0';
@@ -508,6 +919,20 @@ void handleCommand(char *cmd) {
     }
     Serial.print("SERVO set pan="); Serial.print(servoPanPos);
     Serial.print(" tilt="); Serial.println(servoTiltPos);
+  } else if (strcmp(cmd, "BUS SCAN") == 0) {
+    busScan(7);
+  } else if (strncmp(cmd, "BUS SCAN ", 9) == 0) {
+    busScan(atoi(cmd + 9));
+  } else if (strncmp(cmd, "BUS READ ", 9) == 0) {
+    int id = -1, addr = -1, len = -1;
+    sscanf(cmd + 9, "%d %d %d", &id, &addr, &len);
+    busReadRaw(7, id, addr, len);
+  } else if (strncmp(cmd, "ARM ", 4) == 0 && armBySide(cmd[4]) && cmd[5] == ' ') {
+    armCommand(*armBySide(cmd[4]), cmd + 6);
+  } else if (strncmp(cmd, "BUS SETID ", 10) == 0) {
+    int from = -1, to = -1;
+    sscanf(cmd + 10, "%d %d", &from, &to);
+    busSetId(7, from, to);
     } else {
     Serial.print("ERR unknown_command ");  Serial.println(cmd);
   }
