@@ -366,17 +366,22 @@ Also: MJPEG-only means the Jetson CPU-decodes every frame, and JPEG artifacts si
   - Use case: SO-ARM100 / LeRobot robot arm
   - Variant: 6pcs packaging
 
-### Waveshare Serial Bus Servo Driver Board
+### Waveshare Bus Servo Adapter (A)
 - **Store:** Raspberry Pi Store
 - **Link:** https://www.aliexpress.com/item/1005008828027133.html
-- **Qty:** 1 · **Total:** €18.76 · **Status:** Pending
+- **Qty:** 1 · **Total:** €18.76 · **Status:** ✅ In service — drives both arms from the Teensy's `Serial7` (log 028)
 - **Specs:**
   - Brand: Waveshare
-  - Function: Serial bus servo driver/controller
-  - Compatible: ST/SC series servos (FEETECH)
-  - Integrated: Power supply + control circuitry
-  - Interface: For Raspberry Pi GPIO
-  - Use case: Driving TTL serial bus servos from RPi
+  - Function: Serial bus servo adapter, ST/SC series (Feetech)
+  - Power in: 9–12.6 V, DC jack or green screw terminal. Must match the servo voltage
+  - Interfaces: USB-C (on-board USB-UART), 3-pin **UART header TX RX GND** (no power pin), two servo ports on one bus
+  - **Mode jumper:** a 3×2 header with two yellow caps, each joining the shared middle row to one end
+    - **B** (rows nearest the USB-C) = USB → servo, with the UART header cut off
+    - **A** (rows by the UART header) = UART → servo
+  - Wiring to a microcontroller: **RX-RX, TX-TX** (per Waveshare)
+    - board TX → Teensy pin 29 (TX7)
+    - board RX → Teensy pin 28 (RX7)
+    - GND → GND
 
 ### PCA9685 16-Channel 12-bit PWM Servo Driver (I2C)
 - **Store:** Amazon.de (JZK)
@@ -881,7 +886,18 @@ Also fit a **main disconnect** per pack — one action that kills everything. De
 
 ### 🦾 Arms — ElRobot followers, bus wiring per arm
 
-Two [ElRobot](https://github.com/norma-core/norma-core/tree/main/hardware/elrobot) **follower** arms. Each has 8× STS3215 12V (30 kg·cm), 7+1 DOF, **servo IDs 1–8 from base to gripper**, at 1 Mbaud. ElRobot's own BOM gives one Waveshare **Bus Servo Adapter (A)** and one 12V/4A supply per arm.
+Two [ElRobot](https://github.com/norma-core/norma-core/tree/main/hardware/elrobot) **follower** arms. Each has 8× STS3215 12V (30 kg·cm), 7+1 DOF, at 1 Mbaud. ElRobot's own BOM gives one Waveshare **Bus Servo Adapter (A)** and one 12V/4A supply per arm.
+
+**As built (log 028):**
+- **One adapter for both arms,** in UART mode (jumper A), driven by the Teensy's `Serial7` (pins 28/29).
+- **IDs: left 1–8, right 11–18,** base to gripper. Both arms share one bus, so their IDs must not overlap.
+- **Firmware console commands:**
+  - `BUS SCAN`: read-only
+  - `BUS SETID`: the only write, ID register only
+  - `ARM <L|R> STATE / TORQUE ON|OFF / SPEED / MOVE`
+- **The control panel has a card per arm.**
+
+The diagram below is ElRobot's USB variant, one adapter per arm, kept for reference.
 
 ```
 pack (+) ──[15 A fuse]── 16 AWG ──► adapter DC in (5.5×2.1 jack or screw terminal)

@@ -85,6 +85,18 @@
     .hint code { background: rgba(255,255,255,0.07); padding: 1px 5px; border-radius: 5px; font-size: 12px; }
     .rangebar { display: flex; align-items: center; gap: 10px; margin-top: 12px; font-size: 12px; color: #8493b3; }
     .rangebar input { flex: 1; accent-color: #5b8cff; }
+    .joint { display: grid; grid-template-columns: 92px 1fr 64px; align-items: center;
+      gap: 10px; margin-top: 10px; font-size: 12.5px; color: #8493b3; }
+    .joint b { color: #e8ecf6; font-weight: 500; }
+    .joint input { width: 100%; accent-color: #5b8cff; }
+    .joint input:disabled { opacity: .45; }
+    .joint .val { font-family: ui-monospace, monospace; text-align: right; }
+    .armbtns { display: flex; gap: 10px; margin-top: 12px; }
+    .armbtns button { flex: 1; padding: 10px; border-radius: 10px; font: inherit; font-weight: 600;
+      cursor: pointer; border: 1px solid rgba(255,255,255,0.14); color: #e8ecf6;
+      background: rgba(255,255,255,0.06); }
+    .armbtns button.go { background: #2f7d4f; border-color: #37d67a; }
+    .armbtns button.stop { background: #8a2b2b; border-color: #ff5f56; }
     .armcam + .armcam { margin-top: 14px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.06); }
     .armcam .rangebar { margin-top: 0; }
     .armcam .rangebar > span:first-child { color: #e8ecf6; font-size: 13.5px; }
@@ -243,6 +255,47 @@
       </div>
       {% endif %}
     </section>
+
+    <!-- ---------------- Arms ---------------- -->
+    {% for arm in [("left", "Left arm", "arm_left"), ("right", "Right arm", "arm_right")] %}
+    <section class="panel arm-panel" data-arm="{{ arm[0] }}" data-cam="{{ arm[2] }}">
+      <div class="panel-head">
+        <h2>{{ arm[1] }}</h2>
+        <span class="status"><span class="led"></span><span class="arm-text">closed</span></span>
+        <button class="toggle arm-toggle" aria-label="Open {{ arm[1] }} controls"
+                {% if not has_password %}disabled{% endif %}></button>
+      </div>
+      {% if has_password %}
+      <div class="panel-body empty">
+        <div class="stage"><img class="arm-cam" alt="{{ arm[1] }} camera"></div>
+        <div class="armbtns">
+          <button class="go arm-enable">Enable torque</button>
+          <button class="stop arm-release">Release</button>
+        </div>
+        <div class="joint">
+          <b>Speed</b>
+          <input type="range" class="arm-speed" min="50" max="3000" step="50" value="400">
+          <span class="val arm-speed-val">35°/s</span>
+        </div>
+        {% for name in ["J1 base", "J2", "J3", "J4", "J5", "J6", "J7", "J8 gripper"] %}
+        <div class="joint arm-joint">
+          <b>{{ name }}</b>
+          <input type="range" min="0" max="4095" step="1" value="2048" disabled>
+          <span class="val">–</span>
+        </div>
+        {% endfor %}
+        <p class="hint">Sliders follow the arm while torque is off. Turn a joint by
+        hand to see which slider is which. Enable holds every joint where it is,
+        then the sliders move them at 30% torque. 0–4095 is one full turn and 0 and
+        4095 are the same spot, so a joint sitting near either end wraps around.
+        Keep those joints in the middle of their slider until calibrated.
+        <b>Release drops the arm.</b> Support it first.</p>
+      </div>
+      {% else %}
+      <div class="locked">🔒 Set a control-panel password before using the arms.</div>
+      {% endif %}
+    </section>
+    {% endfor %}
 
     <!-- ---------------- Arm cameras ---------------- -->
     <section class="panel" id="armcam-panel">
@@ -619,6 +672,106 @@
       (async () => {
         try { reflect(await api('/api/cameras/' + name + '/status')); } catch {}
       })();
+    });
+
+    // ---- Arms ----
+    // One card per arm. Opening a card starts its camera and polls its joints
+    // every second. Sliders stay disabled until torque is on; while it is off
+    // they follow the arm, so moving a joint by hand shows which slider it is.
+    // A moving slider is sent at most every 120 ms, and once more on release.
+    const armDeg = (v) => Math.round(v * 360 / 4096) + '°/s';   // 4096 steps per turn
+
+    document.querySelectorAll('.arm-panel').forEach((card) => {
+      const name    = card.dataset.arm;
+      const base    = '/api/arm/' + name;
+      const toggle  = card.querySelector('.arm-toggle');
+      const body    = card.querySelector('.panel-body');
+      const status  = card.querySelector('.status');
+      const text    = card.querySelector('.arm-text');
+      const cam     = card.querySelector('.arm-cam');
+      const speed   = card.querySelector('.arm-speed');
+      const speedV  = card.querySelector('.arm-speed-val');
+      const rows    = [...card.querySelectorAll('.arm-joint')];
+      if (!body || !toggle) return;
+      let open = false, torque = false, poll = null, speedTouched = false;
+      const dragging = new Set(), lastSent = {}, pending = {};
+
+      function paint(s) {
+        if (s.speed && !speedTouched) { speed.value = s.speed; speedV.textContent = armDeg(s.speed); }
+        torque = !!s.torque;
+        status.classList.remove('err');
+        status.classList.toggle('on', torque);
+        text.textContent = torque ? 'torque on' : 'limp';
+        rows.forEach((row, i) => {
+          const slider = row.querySelector('input');
+          const val = row.querySelector('.val');
+          const pos = (s.pos || [])[i];
+          slider.disabled = !torque;
+          if (pos === undefined || pos < 0) { val.textContent = 'no reply'; return; }
+          val.textContent = pos + ((s.load || [])[i] > 0 ? ' ·' + s.load[i] + '%' : '');
+          if (!torque || (!dragging.has(i) && pending[i] === undefined)) slider.value = pos;
+        });
+      }
+
+      async function refresh() {
+        try { paint(await api(base)); }
+        catch (e) { text.textContent = 'error'; status.classList.add('err'); }
+      }
+
+      async function send(i) {
+        const pos = pending[i];
+        if (pos === undefined) return;
+        delete pending[i];
+        lastSent[i] = Date.now();
+        try { await api(base + '/move', 'POST', { joint: i + 1, pos: Number(pos) }); }
+        catch (e) { showToast(e.message); }
+      }
+
+      rows.forEach((row, i) => {
+        const slider = row.querySelector('input');
+        slider.addEventListener('pointerdown', () => dragging.add(i));
+        slider.addEventListener('input', () => {
+          pending[i] = slider.value;
+          row.querySelector('.val').textContent = '→ ' + slider.value;
+          const wait = 120 - (Date.now() - (lastSent[i] || 0));
+          if (wait <= 0) send(i); else setTimeout(() => send(i), wait);
+        });
+        slider.addEventListener('change', () => { dragging.delete(i); pending[i] = slider.value; send(i); });
+      });
+
+      speed.addEventListener('input', () => { speedTouched = true; speedV.textContent = armDeg(speed.value); });
+      speed.addEventListener('change', async () => {
+        try { speedV.textContent = armDeg((await api(base + '/speed', 'POST', { speed: Number(speed.value) })).speed); }
+        catch (e) { showToast(e.message); }
+        speedTouched = false;
+      });
+
+      toggle.addEventListener('click', async () => {
+        open = !open;
+        toggle.classList.toggle('on', open);
+        body.classList.toggle('empty', !open);
+        if (open) {
+          try { await api('/api/cameras/' + card.dataset.cam + '/start', 'POST'); } catch {}
+          cam.src = '/cameras/' + card.dataset.cam + '/stream.mjpg?t=' + Date.now();
+          refresh();
+          poll = setInterval(refresh, 1000);
+        } else {
+          clearInterval(poll);
+          cam.removeAttribute('src');
+          text.textContent = torque ? 'torque on' : 'closed';
+        }
+      });
+
+      card.querySelector('.arm-enable').addEventListener('click', async () => {
+        try { await api(base + '/torque', 'POST', { on: true }); showToast('Torque on — holding position'); }
+        catch (e) { showToast(e.message); }
+        refresh();
+      });
+      card.querySelector('.arm-release').addEventListener('click', async () => {
+        try { await api(base + '/torque', 'POST', { on: false }); showToast('Released'); }
+        catch (e) { showToast(e.message); }
+        refresh();
+      });
     });
 
     // ---- LiDAR ----

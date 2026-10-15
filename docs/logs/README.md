@@ -41,6 +41,7 @@ NNN-YYYY-MM-DD-short-title.md
 | [025](025-2026-09-19-the-speaker-drowns-the-wake-word.md) | 2026-09-19 | At 90% the music masks the voice at the microphone itself — proven on the raw uncancelled mic — plus a touch "Wake!" button, and a window manager that will not let it show over video | ✅ Cause proven · ✅ Touch controls drawn inside mpv, over fullscreen video · ❌ Wake at volume unsolved |
 | [026](026-2026-10-09-the-reentrancy-guard-wedged-the-kiosk.md) | 2026-10-09 | The re-entrancy guard wedged the kiosk for 20 days — one unbounded `room.disconnect()` in a catch block, and every later wake silently ignored | ✅ Fixed and deployed |
 | [027](027-2026-10-13-arm-cameras-on-the-panel.md) | 2026-10-13 | Arm cameras on the panel — two OV9281s sharing serial `SN0001`, one that only runs at 210 fps, and a single V4L2 buffer that ate 40 % of its frames | ✅ Working and deployed · ✅ Left camera reflashed to the right camera's 2024 firmware, now 30 fps · ❌ `quirks=128` found useless for MJPEG |
+| [028](028-2026-10-15-both-arms-on-the-servo-bus.md) | 2026-10-15 | Both arms on the servo bus: the board's A/B jumper, a whole chain still at factory ID 1, assigning 16 IDs on assembled arms, and the first moves straining against a 30% torque cap and the 0/4095 seam | ✅ IDs and panel working · 🔄 Calibration and strength next |
 
 Entries are either **problems** (001, 003) or **design decision records** (002). Both belong here — a decision you cannot reconstruct the reasoning for is as expensive as a bug you cannot reproduce.
 
