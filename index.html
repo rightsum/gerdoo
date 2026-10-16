@@ -1,0 +1,1056 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Gerdoo Playground</title>
+<meta name="description" content="Gerdoo's arms, body and lidar in the browser: pose the two ElRobot arms, drive, and see contacts and lidar blind spots.">
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}[hidden]{display:none!important}*,*::before,*::after{box-sizing:border-box}</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@400;500;600&display=swap">
+<style>
+/* Layout: one screen. 3D stage on the left, a scrolling control rail on the right; on phones the rail drops under the stage. */
+:root {
+  --bg: #e4e7eb;
+  --panel: #f3f5f7;
+  --raise: #ffffff;
+  --ink: #1a1e23;
+  --muted: #59626c;
+  --line: #cdd3da;
+  --accent: #b86e00;
+  --accent-soft: rgba(184, 110, 0, 0.14);
+  --ok: #1f8a4c;
+  --bad: #d23b3f;
+  --bad-soft: rgba(210, 59, 63, 0.12);
+  --scene-bg: #dde2e8;
+  --scene-floor: #d2d8df;
+  --scene-grid: #b4bcc6;
+  --scene-wall: #c3cad3;
+  --scene-obstacle: #9aa4b0;
+  --font-display: "Chakra Petch", "Bahnschrift", "Arial Narrow", sans-serif;
+  --font-ui: "IBM Plex Sans Condensed", "Roboto Condensed", "Arial Narrow", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0d0f12; --panel: #13161a; --raise: #1a1e23; --ink: #e5e8ec; --muted: #8d96a1; --line: #262b32;
+    --accent: #ffae1e; --accent-soft: rgba(255, 174, 30, 0.14); --ok: #3fc07a; --bad: #ff5d61; --bad-soft: rgba(255, 93, 97, 0.14);
+    --scene-bg: #0b0d10; --scene-floor: #111418; --scene-grid: #232931; --scene-wall: #1c2128; --scene-obstacle: #39424d;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0d0f12; --panel: #13161a; --raise: #1a1e23; --ink: #e5e8ec; --muted: #8d96a1; --line: #262b32;
+  --accent: #ffae1e; --accent-soft: rgba(255, 174, 30, 0.14); --ok: #3fc07a; --bad: #ff5d61; --bad-soft: rgba(255, 93, 97, 0.14);
+  --scene-bg: #0b0d10; --scene-floor: #111418; --scene-grid: #232931; --scene-wall: #1c2128; --scene-obstacle: #39424d;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font-ui); font-size: 15px; line-height: 1.45; }
+.app { height: 100%; display: grid; grid-template-columns: minmax(0, 1fr) 23rem; grid-template-rows: auto minmax(0, 1fr); }
+.top {
+  grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem 1.25rem;
+  padding-block: 0.55rem; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  border-bottom: 1px solid var(--line); background: var(--panel);
+}
+.brand { display: flex; align-items: baseline; gap: 0.75rem; min-width: 0; flex-wrap: wrap; }
+.brand b { font-family: var(--font-display); font-weight: 600; font-size: 1.45rem; letter-spacing: 0.04em; text-transform: lowercase; }
+.brand b::after { content: ""; display: inline-block; width: 0.55em; height: 0.62em; margin-left: 0.3em; border-radius: 0.14em; background: var(--accent); vertical-align: -0.02em; }
+.brand span { color: var(--muted); font-size: 0.9rem; }
+.chips { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.chip {
+  display: inline-flex; align-items: center; gap: 0.45rem; padding: 0.22rem 0.65rem; border-radius: 999px; border: 1px solid var(--line);
+  font-size: 0.82rem; letter-spacing: 0.02em; background: var(--raise); white-space: nowrap;
+}
+.chip i { width: 0.55rem; height: 0.55rem; border-radius: 50%; background: var(--ok); }
+.chip.bad { border-color: var(--bad); background: var(--bad-soft); }
+.chip.bad i { background: var(--bad); }
+.chip.warn i { background: var(--accent); }
+
+.stage { position: relative; min-height: 0; min-width: 0; background: var(--scene-bg); }
+#view { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; outline: none; }
+.loading {
+  position: absolute; inset: 0; display: grid; place-content: center; gap: 0.6rem; justify-items: center;
+  font-family: var(--font-mono); font-size: 0.85rem; color: var(--muted); background: var(--scene-bg);
+}
+.loading .bar { width: 14rem; max-width: 70vw; height: 3px; background: var(--line); border-radius: 2px; overflow: hidden; }
+.loading .bar span { display: block; height: 100%; width: 0%; background: var(--accent); transition: width 120ms linear; }
+.views { position: absolute; top: 0.75rem; right: 0.75rem; display: flex; gap: 0.3rem; flex-wrap: wrap; justify-content: flex-end; }
+.views button, .pad button {
+  font: 500 0.78rem/1 var(--font-ui); letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink);
+  background: color-mix(in srgb, var(--raise) 82%, transparent); border: 1px solid var(--line); border-radius: 6px; padding: 0.45rem 0.6rem; cursor: pointer;
+}
+.views button:hover, .pad button:hover { border-color: var(--accent); }
+.scan {
+  position: absolute; left: 0.75rem; bottom: 0.75rem; width: 168px; height: 168px; border-radius: 50%;
+  background: color-mix(in srgb, var(--raise) 78%, transparent); border: 1px solid var(--line);
+}
+.scan-label { position: absolute; left: 0.75rem; bottom: calc(0.75rem + 172px); font: 500 0.72rem/1.2 var(--font-mono); color: var(--muted); letter-spacing: 0.04em; }
+.pad { position: absolute; right: 0.75rem; bottom: 0.75rem; display: grid; grid-template-columns: repeat(3, 2.6rem); grid-template-rows: repeat(2, 2.6rem); gap: 0.3rem; }
+.pad button { padding: 0; font-size: 1rem; touch-action: none; }
+.pad .up { grid-column: 2; grid-row: 1; } .pad .left { grid-column: 1; grid-row: 2; } .pad .down { grid-column: 2; grid-row: 2; } .pad .right { grid-column: 3; grid-row: 2; }
+.keys { position: absolute; left: 0.75rem; top: 0.75rem; font: 0.75rem/1.4 var(--font-mono); color: var(--muted); max-width: 16rem; }
+kbd { font-family: var(--font-mono); font-size: 0.72rem; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 0.3rem; background: var(--raise); color: var(--ink); }
+
+.rail {
+  overflow-y: auto; min-height: 0; background: var(--panel); border-left: 1px solid var(--line);
+  padding-block: 0.25rem 2rem; padding-left: 16px; padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.contacts { margin-block: 0.75rem 0.25rem; padding: 0.65rem 0.75rem; border-radius: 8px; border: 1px solid var(--line); background: var(--raise); font-size: 0.88rem; }
+.contacts.bad { border-color: var(--bad); background: var(--bad-soft); }
+.contacts h2 { font: 600 0.74rem/1.2 var(--font-ui); letter-spacing: 0.09em; text-transform: uppercase; color: var(--muted); margin: 0 0 0.35rem; }
+.contacts ul { margin: 0; padding-left: 1.1rem; font-family: var(--font-mono); font-size: 0.8rem; }
+.contacts p { margin: 0; }
+details { border-bottom: 1px solid var(--line); }
+summary {
+  list-style: none; cursor: pointer; padding-block: 0.8rem; display: flex; align-items: baseline; justify-content: space-between; gap: 0.5rem;
+  font: 600 0.8rem/1.2 var(--font-ui); letter-spacing: 0.09em; text-transform: uppercase;
+}
+summary::-webkit-details-marker { display: none; }
+summary::after { content: "+"; font-family: var(--font-mono); color: var(--muted); }
+details[open] > summary::after { content: "–"; }
+summary small { font: 400 0.76rem/1 var(--font-mono); letter-spacing: 0; text-transform: none; color: var(--muted); margin-left: auto; }
+.body { display: grid; gap: 0.55rem; padding-bottom: 1rem; }
+.joint { display: grid; grid-template-columns: 8.2rem minmax(0, 1fr) 3.4rem; align-items: center; gap: 0.6rem; }
+.joint label { font-size: 0.86rem; line-height: 1.15; }
+.joint label small { display: block; color: var(--muted); font-size: 0.72rem; font-family: var(--font-mono); }
+.joint output { font: 0.8rem var(--font-mono); text-align: right; font-variant-numeric: tabular-nums; }
+.joint.hit label { color: var(--bad); }
+input[type="range"] { -webkit-appearance: none; appearance: none; width: 100%; height: 1.6rem; background: transparent; cursor: pointer; }
+input[type="range"]::-webkit-slider-runnable-track { height: 3px; border-radius: 2px; background: var(--line); }
+input[type="range"]::-moz-range-track { height: 3px; border-radius: 2px; background: var(--line); }
+input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; margin-top: -5.5px; border-radius: 3px; background: var(--accent); border: 2px solid var(--raise); }
+input[type="range"]::-moz-range-thumb { width: 12px; height: 12px; border-radius: 3px; background: var(--accent); border: 2px solid var(--raise); }
+input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.row { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.btn {
+  font: 500 0.84rem/1 var(--font-ui); color: var(--ink); background: var(--raise); border: 1px solid var(--line);
+  border-radius: 6px; padding: 0.5rem 0.7rem; cursor: pointer;
+}
+.btn:hover { border-color: var(--accent); }
+.btn[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); }
+.btn:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.check { display: flex; align-items: center; gap: 0.5rem; font-size: 0.88rem; cursor: pointer; }
+.check input { accent-color: var(--accent); width: 1rem; height: 1rem; }
+.readout { font: 0.8rem/1.5 var(--font-mono); color: var(--muted); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.note { font-size: 0.85rem; color: var(--muted); margin: 0; max-width: 62ch; }
+.note b { color: var(--ink); font-weight: 600; }
+.notes { margin: 0; padding-left: 1.05rem; display: grid; gap: 0.35rem; font-size: 0.85rem; color: var(--muted); }
+.notes b { color: var(--ink); font-weight: 600; }
+@media (max-width: 820px) {
+  .app { height: auto; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 62svh auto; }
+  .rail { border-left: 0; border-top: 1px solid var(--line); overflow: visible; padding-left: max(16px, env(safe-area-inset-left, 0px)); }
+  .scan { width: 128px; height: 128px; } .scan-label { bottom: calc(0.75rem + 132px); }
+  .keys { display: none; }
+}
+@media (hover: none) { .keys { display: none; } }
+</style>
+
+<div class="app">
+  <header class="top">
+    <div class="brand"><b>gerdoo</b><span>arms, body and lidar playground · Fusion preview of 16 Oct 2026</span></div>
+    <div class="chips" aria-live="polite">
+      <span class="chip" id="chip-clash"><i></i><span>Loading</span></span>
+      <span class="chip" id="chip-lidar"><i></i><span>Lidar</span></span>
+      <span class="chip" id="chip-tip"><i></i><span>Stability</span></span>
+      <span class="chip" id="chip-dock"><i></i><span>Dock</span></span>
+    </div>
+  </header>
+
+  <section class="stage" aria-label="3D view of gerdoo">
+    <canvas id="view" tabindex="0" aria-label="Drag to orbit, scroll to zoom, W A S D to drive"></canvas>
+    <div class="keys"><kbd>W</kbd><kbd>S</kbd> drive · <kbd>A</kbd><kbd>D</kbd> turn · drag to orbit · right-drag to pan</div>
+    <div class="views" role="group" aria-label="Camera">
+      <button type="button" data-view="iso">Iso</button>
+      <button type="button" data-view="front">Front</button>
+      <button type="button" data-view="side">Side</button>
+      <button type="button" data-view="back">Back</button>
+      <button type="button" data-view="top">Top</button>
+    </div>
+    <div class="scan-label" id="scan-label">C1 scan · robot-centred · 1 m rings</div>
+    <canvas class="scan" id="scan" width="336" height="336" aria-label="Lidar scan seen from above"></canvas>
+    <div class="pad" role="group" aria-label="Drive">
+      <button type="button" class="up" data-drive="up" aria-label="Forward">▲</button>
+      <button type="button" class="left" data-drive="left" aria-label="Turn left">◀</button>
+      <button type="button" class="down" data-drive="down" aria-label="Back">▼</button>
+      <button type="button" class="right" data-drive="right" aria-label="Turn right">▶</button>
+    </div>
+    <div class="loading" id="loading"><span id="loading-text">Loading gerdoo…</span><div class="bar"><span id="loading-bar"></span></div></div>
+  </section>
+
+  <aside class="rail">
+    <div class="contacts" id="contacts" aria-live="polite"><h2>Contacts</h2><p>Waiting for the model.</p></div>
+
+    <details open>
+      <summary>Poses <small>both arms</small></summary>
+      <div class="body">
+        <div class="row" id="presets">
+          <button class="btn" type="button" data-pose="rest">Rest</button>
+          <button class="btn" type="button" data-pose="reach">Reach out</button>
+          <button class="btn" type="button" data-pose="up">Hands up</button>
+          <button class="btn" type="button" data-pose="low">Reach low</button>
+          <button class="btn" type="button" data-pose="meet">Hands meet</button>
+          <button class="btn" type="button" id="wave" aria-pressed="false">Wave</button>
+        </div>
+        <label class="check"><input type="checkbox" id="mirror" checked> Mirror the left arm onto the right</label>
+        <p class="note">Hands up and Reach low show the two problems worth seeing: the raised arm cuts the lidar's view, and the low reach comes close to the wheels and the deck.</p>
+      </div>
+    </details>
+
+    <details open>
+      <summary>Left arm <small>servo IDs 1–8</small></summary>
+      <div class="body" id="arm-L"></div>
+    </details>
+
+    <details>
+      <summary>Right arm <small>servo IDs 11–18</small></summary>
+      <div class="body" id="arm-R"></div>
+    </details>
+
+    <details>
+      <summary>Neck <small>2× SG90</small></summary>
+      <div class="body" id="neck">
+        <label class="check"><input type="checkbox" id="follow"> Face follows the camera</label>
+      </div>
+    </details>
+
+    <details>
+      <summary>Drive <small>36GP-555, Ø66 wheels</small></summary>
+      <div class="body">
+        <div class="joint"><label for="speed">Top speed<small>m/s</small></label><input type="range" id="speed" min="0.05" max="0.5" step="0.01" value="0.25"><output id="speed-out">0.25</output></div>
+        <label class="check"><input type="checkbox" id="chase" checked> Camera follows the robot</label>
+        <div class="row"><button class="btn" type="button" id="home">Back to the start</button></div>
+        <div class="readout" id="odo">x 0.00 m · y 0.00 m · heading 0°</div>
+      </div>
+    </details>
+
+    <details open>
+      <summary>Stability <small>5.5 kg, CoG ~155 mm up</small></summary>
+      <div class="body">
+        <label class="check"><input type="checkbox" id="payload"> 250 g in each gripper</label>
+        <label class="check"><input type="checkbox" id="show-cog" checked> Show the centre of gravity and the support polygon</label>
+        <div class="readout" id="tip-readout">—</div>
+        <p class="note">The robot stands on the two wheels and the front and back casters, a diamond 180 × 291 mm. Braking pushes the centre of gravity forward by its height × deceleration / g; the limit below is where it reaches the front caster. A swivel caster's wheel trails 10–20 mm behind its pivot, so treat the front limit as optimistic.</p>
+      </div>
+    </details>
+
+    <details>
+      <summary>Lidar and room <small>RPLIDAR C1</small></summary>
+      <div class="body">
+        <label class="check"><input type="checkbox" id="show-scan" checked> Show the scan</label>
+        <label class="check"><input type="checkbox" id="show-room" checked> Show the room</label>
+        <div class="readout" id="lidar-readout">—</div>
+        <p class="note">360 beams, one per degree, in the plane 30 mm above the C1's base. Red beams end on gerdoo itself.</p>
+      </div>
+    </details>
+
+    <details>
+      <summary>Lights and covers</summary>
+      <div class="body">
+        <div class="joint"><label for="mouth">Mouth strip<small>KA009, 300 mm</small></label><input type="range" id="mouth" min="0" max="1" step="0.01" value="0.8"><output id="mouth-out">80%</output></div>
+        <div class="joint"><label for="covers">Covers<small>opacity</small></label><input type="range" id="covers" min="0.08" max="1" step="0.01" value="1"><output id="covers-out">100%</output></div>
+        <label class="check"><input type="checkbox" id="highlight" checked> Paint contacts red</label>
+      </div>
+    </details>
+
+    <details>
+      <summary>Camera</summary>
+      <div class="body">
+        <div class="readout" id="camera-readout">—</div>
+        <div class="row"><button class="btn" type="button" id="copy-view">Copy view</button><span class="readout" id="copy-state" aria-live="polite"></span></div>
+      </div>
+    </details>
+
+    <details>
+      <summary>What this model is</summary>
+      <div class="body">
+        <ul class="notes">
+          <li><b>Body:</b> every visible part of the Fusion file <code>gerdoo-assembly-preview</code>, exported at low resolution, including the new covers and the 3rd floor with the speaker grille.</li>
+          <li><b>Arms:</b> ElRobot follower URDF from norma-core, mounted with J1 at ±145.7 mm, on gerdoo's own round arm bases.</li>
+          <li><b>Contacts:</b> mesh-exact checks of every arm part against the body, the other arm and the floor. A part of one arm is not checked against the same arm, so J1 stops at ±88.9°, where its yoke meets the housing.</li>
+          <li><b>Mass model:</b> printed parts from their Fusion volumes, arm links from the ElRobot URDF, the rest from datasheets or estimates (<code>sim/web/tools/physics.py</code>).</li>
+          <li><b>Dock:</b> <code>charging-dock-v1</code>; the robot starts on it. Drive forward to leave, and back into it within 4 mm and 3° to charge.</li>
+          <li><b>Approximate:</b> the neck gimbal's two axes, the Brio, and the scan height. Wheels roll without slipping and there is no physics.</li>
+        </ul>
+      </div>
+    </details>
+  </aside>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+    "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+    "urdf-loader": "https://cdn.jsdelivr.net/npm/urdf-loader@0.12.6/src/URDFLoader.js",
+    "three-mesh-bvh": "https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.7.8/src/index.js"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+import URDFLoader from 'urdf-loader';
+import { computeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
+
+THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
+THREE.Mesh.prototype.raycast = acceleratedRaycast;
+
+const $ = (id) => document.getElementById(id);
+const DEG = 180 / Math.PI;
+
+// ---------- presets (left arm, radians; the right arm mirrors J1, J5, J7) ----------
+const POSES = {
+  rest:  { j1: 0, j2: 0, j3: 0, j4: 0, j5: 0, j6: 0, j7: 0, gripper: 0 },
+  reach: { j1: 0.08, j2: 0.78, j3: -0.47, j4: -0.47, j5: -0.02, j6: 0.18, j7: -0.13, gripper: 0.9 },
+  up:    { j1: 0, j2: -0.11, j3: -0.72, j4: -0.5, j5: 0.46, j6: -0.39, j7: -0.11, gripper: 0.3 },
+  low:   { j1: 0.09, j2: 0.62, j3: 0.37, j4: -0.12, j5: 0.4, j6: 0.13, j7: -0.28, gripper: 1.4 },
+  meet:  { j1: -0.31, j2: -0.42, j3: 0.71, j4: 0.12, j5: -0.34, j6: -0.85, j7: -0.21, gripper: 0.2 },
+};
+const MIRROR = { j1: -1, j2: 1, j3: 1, j4: 1, j5: -1, j6: 1, j7: -1, gripper: 1 };
+const JOINT_INFO = {
+  j1: 'base yaw', j2: 'shoulder', j3: 'elbow', j4: 'forearm', j5: 'wrist roll', j6: 'wrist pitch', j7: 'hand roll', gripper: 'gripper',
+};
+const ID_BASE = { L: 1, R: 11 };
+const BODY_NAMES = {
+  deck: '1st layer', floors: '2nd/3rd floor', posts: 'posts', cover_front: 'front cover', cover_back: 'back cover',
+  electronics: 'electronics', sensors: 'ultrasonic pod', brain: 'Jetson + UPS', drive: 'drive motor', top: 'lidar holder',
+  neck_static: 'neck base', antennas: 'antenna', wheel_left: 'left wheel', wheel_right: 'right wheel',
+  neck_pan: 'neck', neck_tilt: 'face screen', lidar: 'lidar', armbase: 'arm base',
+};
+const WHEEL_R = 0.03315, TRACK = 0.2913;
+// mass model: arm links from the ElRobot URDF inertials, the rest from tools/physics.py (Fusion volumes + parts list)
+const MASS = {"links":{"ST3215_1_v1_1":[31.91,4e-06,0.02269,-0.001424],"Joint_01_1":[36.02,0.000193,0.010535,-0.002903],"ST3215_2_v1_1":[31.91,-0.001424,-0.000194,0.022689],"Joint_02_1":[43.13,0.020187,-0.000361,0.040489],"ST3215_3_v1_1":[31.91,-0.001226,-0.000194,0.022701],"Joint_03_v1_1":[37.05,0.021383,0.002597,0.028573],"ST3215_4_v1_1":[31.91,-0.001424,0.022689,0.000219],"Joint_04_v1_1":[49.11,0.020415,0.046348,0.000473],"ST3215_5_v1_1":[31.91,0.000383,-0.001621,0.022431],"Joint_05_v1_1":[15.03,-0.001451,0.014886,0.000239],"ST3215_6_v1_1":[31.91,-0.001229,0.022701,1.8e-05],"Joint_06_v1_1":[37.28,0.020434,0.031977,0.000356],"ST3215_7_v1_1":[31.91,0.000373,-0.001426,0.022445],"Gripper_Base_v1_1":[46.9,0.000561,0.03192,-0.000595],"ST3215_8_v1_1":[31.91,-0.000546,-0.018926,-0.012206],"Gripper_Gear_v1_1":[2.48,6.4e-05,0.003756,-3.4e-05],"Gripper_Jaw_02_v1_1":[12.49,-0.338681,0.262592,-0.030317],"Gripper_Jaw_01_v1_1":[12.49,-0.279442,0.305316,0.04628]},"body":{"mass_g":4423,"cog_mm":[-1.9,0.3,123.1]}};
+
+// ---------- renderer, scene, camera ----------
+const canvas = $('view');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(34, 1, 0.01, 60);
+const controls = new OrbitControls(camera, canvas);
+controls.enableDamping = true;
+controls.dampingFactor = 0.09;
+controls.maxPolarAngle = Math.PI * 0.495;
+controls.minDistance = 0.25;
+controls.maxDistance = 8;
+
+const hemi = new THREE.HemisphereLight(0xffffff, 0x666666, 1.1);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xffffff, 2.4);
+sun.position.set(1.6, 3.2, 1.2);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -1.4, right: 1.4, top: 1.4, bottom: -1.4, near: 0.5, far: 8 });
+sun.shadow.bias = -0.0004;
+scene.add(sun, sun.target);
+const fill = new THREE.DirectionalLight(0xffffff, 0.7);
+fill.position.set(-2, 1.5, -1.5);
+scene.add(fill);
+
+const floorMat = new THREE.MeshStandardMaterial({ roughness: 0.95 });
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(14, 14), floorMat);
+floor.rotation.x = -Math.PI / 2;
+floor.receiveShadow = true;
+scene.add(floor);
+let grid = null;
+
+// ---------- room (what the lidar sees) ----------
+const room = new THREE.Group();
+const wallMat = new THREE.MeshStandardMaterial({ roughness: 0.9, transparent: true, opacity: 0.85 });
+const obstacleMat = new THREE.MeshStandardMaterial({ roughness: 0.75 });
+function box(w, h, d, x, y, z, mat) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+  m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true; room.add(m); return m;
+}
+function cyl(r, h, x, y, z, mat) {
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 28), mat);
+  m.position.set(x, y, z); m.castShadow = true; room.add(m); return m;
+}
+const ROOM = { x0: -1.7, x1: 2.7, z0: -1.75, z1: 1.75, h: 0.5 };
+box(ROOM.x1 - ROOM.x0, ROOM.h, 0.05, (ROOM.x0 + ROOM.x1) / 2, ROOM.h / 2, ROOM.z0, wallMat);
+box(ROOM.x1 - ROOM.x0, ROOM.h, 0.05, (ROOM.x0 + ROOM.x1) / 2, ROOM.h / 2, ROOM.z1, wallMat);
+box(0.05, ROOM.h, ROOM.z1 - ROOM.z0, ROOM.x0, ROOM.h / 2, 0, wallMat);
+box(0.05, ROOM.h, ROOM.z1 - ROOM.z0, ROOM.x1, ROOM.h / 2, 0, wallMat);
+// table: legs at lidar height, top above it
+box(1.0, 0.03, 0.6, 1.75, 0.74, -1.1, obstacleMat);
+for (const [dx, dz] of [[-0.46, -0.26], [0.46, -0.26], [-0.46, 0.26], [0.46, 0.26]]) box(0.04, 0.73, 0.04, 1.75 + dx, 0.365, -1.1 + dz, obstacleMat);
+box(0.45, 0.4, 0.35, 2.05, 0.2, 1.0, obstacleMat);                        // crate
+cyl(0.065, 0.86, 1.25, 0.43, 0.32, obstacleMat); cyl(0.065, 0.86, 1.25, 0.43, 0.56, obstacleMat);  // a person
+cyl(0.17, 0.62, 1.25, 1.17, 0.44, obstacleMat);
+for (const [dx, dz] of [[-0.2, -0.2], [0.2, -0.2], [-0.2, 0.2], [0.2, 0.2]]) box(0.035, 0.45, 0.035, -0.95 + dx, 0.225, -1.05 + dz, obstacleMat); // chair
+box(0.45, 0.04, 0.45, -0.95, 0.46, -1.05, obstacleMat);
+scene.add(room);
+room.traverse((o) => { if (o.isMesh) o.geometry.computeBoundsTree(); });
+
+// ---------- theme ----------
+function cssColor(name) { return new THREE.Color(getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#888'); }
+function applyTheme() {
+  scene.background = cssColor('--scene-bg');
+  floorMat.color = cssColor('--scene-floor');
+  wallMat.color = cssColor('--scene-wall');
+  obstacleMat.color = cssColor('--scene-obstacle');
+  if (grid) { scene.remove(grid); grid.geometry.dispose(); }
+  const g = cssColor('--scene-grid');
+  grid = new THREE.GridHelper(14, 56, g, g);
+  grid.position.y = 0.0005;
+  grid.material.transparent = true; grid.material.opacity = 0.75;
+  scene.add(grid);
+  drawScan();
+}
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
+new MutationObserver(applyTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'class'] });
+
+// ---------- robot ----------
+const rig = new THREE.Group();          // the robot's pose on the floor
+scene.add(rig);
+let robot = null;
+const armMeshes = { L: [], R: [] };
+const bodyMeshes = [];
+const coverMeshes = [];
+const selfMeshes = [];                  // what the lidar can hit on gerdoo
+const pose = { x: 0, z: 0, yaw: 0 };
+const wheels = { l: 0, r: 0 };
+
+const manager = new THREE.LoadingManager();
+manager.onProgress = (_url, loaded, total) => {
+  $('loading-bar').style.width = (100 * loaded / Math.max(total, 1)).toFixed(0) + '%';
+  $('loading-text').textContent = `Loading meshes ${loaded} / ${total}`;
+};
+const stl = new STLLoader(manager);
+const loader = new URDFLoader(manager);
+loader.parseCollision = false;
+loader.loadMeshCb = (path, _m, done) => {
+  stl.load(path, (geom) => {
+    const mesh = new THREE.Mesh(geom, new THREE.MeshStandardMaterial());
+    mesh.userData.src = path.split('/').pop().replace('.stl', '');
+    done(mesh);
+  }, undefined, (err) => done(null, err));
+};
+loader.load('gerdoo.urdf', (r) => { robot = r; });
+manager.onLoad = () => { if (robot) init(); };
+manager.onError = (url) => { $('loading-text').textContent = `Could not load ${url}. Reload the page to try again.`; };
+
+function linkOf(obj) { let o = obj; while (o && !o.isURDFLink) o = o.parent; return o; }
+function prettyArmPart(linkName) {
+  const side = linkName[0];
+  let n = linkName.slice(2);
+  let m;
+  if ((m = n.match(/^ST3215_(\d)/))) n = `servo ${Number(m[1]) + ID_BASE[side] - 1}`;
+  else if ((m = n.match(/^Joint_0(\d)/))) n = `link ${m[1]}`;
+  else if (n.startsWith('Gripper_Jaw')) n = 'jaw';
+  else if (n.startsWith('Gripper')) n = 'gripper';
+  return `${side === 'L' ? 'left' : 'right'} ${n}`;
+}
+
+function init() {
+  robot.rotation.x = -Math.PI / 2;       // URDF is Z-up
+  rig.add(robot);
+  robot.traverse((o) => {
+    if (!o.isMesh) return;
+    const link = linkOf(o);
+    const lname = link ? link.name : '';
+    const src = o.userData.src;
+    const old = o.material;
+    const metal = /drive|posts/.test(src) ? 0.55 : 0.05;
+    o.material = new THREE.MeshStandardMaterial({ color: old.color ? old.color.clone() : 0x999999, roughness: 0.62, metalness: metal });
+    if (old.dispose) old.dispose();
+    o.castShadow = true; o.receiveShadow = true;
+    o.geometry.computeBoundingBox();
+    o.geometry.computeBoundsTree();
+    o.userData.link = lname;
+    if (/^[LR]_/.test(lname)) {
+      o.userData.label = prettyArmPart(lname);
+      armMeshes[lname[0]].push(o);
+      selfMeshes.push(o);
+    } else {
+      const key = lname === 'base_link' ? src : lname;
+      o.userData.label = BODY_NAMES[key] || key;
+      if (key !== 'armbase') bodyMeshes.push(o);
+      if (key === 'cover_front' || key === 'cover_back') coverMeshes.push(o);
+      if (key !== 'lidar' && key !== 'top') selfMeshes.push(o);
+      if (key === 'lidar') o.visible = false;
+    }
+  });
+  addLidarBody();
+  addFaceScreen();
+  addReactor();
+  addMouth();
+  buildArmControls('L'); buildArmControls('R'); buildNeckControls();
+  applyTheme();
+  setView('iso', true);
+  setPose('rest');
+  $('loading').hidden = true;
+  resize();
+  dirty = true;
+  if (location.hash === '#selftest') runSelfTest();
+}
+
+// C1: a round housing with its scan window (the preview only had a box)
+let lidarOrigin = null;
+function addLidarBody() {
+  const l = robot.links.lidar;
+  const mat = new THREE.MeshStandardMaterial({ color: 0x1b1d20, roughness: 0.5 });
+  const base = new THREE.Mesh(new THREE.BoxGeometry(0.0556, 0.0556, 0.016), mat);
+  base.position.z = 0.008;
+  const top = new THREE.Mesh(new THREE.CylinderGeometry(0.0262, 0.0262, 0.0253, 48), mat);
+  top.rotation.x = Math.PI / 2; top.position.z = 0.016 + 0.01265;
+  const win = new THREE.Mesh(new THREE.CylinderGeometry(0.0264, 0.0264, 0.006, 48, 1, true),
+    new THREE.MeshStandardMaterial({ color: 0x2a0f0f, emissive: 0x5a1010, roughness: 0.2 }));
+  win.rotation.x = Math.PI / 2; win.position.z = 0.030;
+  for (const m of [base, top, win]) { m.castShadow = true; l.add(m); }
+  lidarOrigin = new THREE.Object3D(); lidarOrigin.position.z = 0.030; l.add(lidarOrigin);
+}
+
+// the kiosk face (robot-face's amber eyes) on the 5.5" screen
+const faceCanvas = document.createElement('canvas');
+faceCanvas.width = 512; faceCanvas.height = 288;
+const faceTex = new THREE.CanvasTexture(faceCanvas);
+faceTex.colorSpace = THREE.SRGBColorSpace;
+function planeFacingX(w, h) {
+  const g = new THREE.PlaneGeometry(w, h);
+  g.applyMatrix4(new THREE.Matrix4().makeBasis(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1), new THREE.Vector3(1, 0, 0)));
+  return g;
+}
+function addFaceScreen() {
+  const m = new THREE.Mesh(planeFacingX(0.118, 0.066), new THREE.MeshBasicMaterial({ map: faceTex }));
+  m.position.set(0.0272, -0.0005, 0.001);
+  robot.links.neck_tilt.add(m);
+}
+function drawFace(t) {
+  const a = faceCanvas.getContext('2d');
+  const W = faceCanvas.width, H = faceCanvas.height, S = H / 1080;
+  a.fillStyle = '#070503'; a.fillRect(0, 0, W, H);
+  const blink = (t % 4.2) < 0.13 ? 0.12 : 1;
+  a.fillStyle = '#FFAE1E'; a.strokeStyle = '#FFAE1E';
+  const cy = H / 2 - 60 * S + 5 * S * Math.sin(t * 1.1);
+  for (const m of [-1, 1]) {
+    const ew = 290 * S, eh = 330 * S * blink, cx = W / 2 + m * 300 * S;
+    const r = 0.3 * Math.min(ew, eh);
+    a.beginPath(); a.roundRect(cx - ew / 2, cy - eh / 2, ew, eh, r); a.fill();
+  }
+  a.lineWidth = 24 * S; a.lineCap = 'round';
+  const my = cy + 330 * S;
+  a.beginPath(); a.moveTo(W / 2 - 125 * S, my); a.quadraticCurveTo(W / 2, my + 0.55 * 95 * S, W / 2 + 125 * S, my); a.stroke();
+  faceTex.needsUpdate = true;
+}
+
+// the 1.69" display in the arc reactor
+const reactorCanvas = document.createElement('canvas');
+reactorCanvas.width = 120; reactorCanvas.height = 140;
+const reactorTex = new THREE.CanvasTexture(reactorCanvas);
+reactorTex.colorSpace = THREE.SRGBColorSpace;
+function addReactor() {
+  const m = new THREE.Mesh(planeFacingX(0.028, 0.0326), new THREE.MeshBasicMaterial({ map: reactorTex }));
+  m.position.set(0.1297, 0, 0.1253 + 0.0667);   // window centre, preview (0, 125.3, z 129.7)
+  robot.links.base_link.add(m);
+}
+function drawReactor(t) {
+  const a = reactorCanvas.getContext('2d');
+  const W = reactorCanvas.width, H = reactorCanvas.height;
+  a.fillStyle = '#03080b'; a.fillRect(0, 0, W, H);
+  a.save(); a.translate(W / 2, H / 2);
+  a.strokeStyle = '#7fe3ff'; a.lineCap = 'round';
+  for (let i = 0; i < 3; i++) {
+    a.globalAlpha = 0.35 + 0.2 * i; a.lineWidth = 4 - i;
+    const r = 22 + i * 13, s = t * (0.6 + 0.4 * i) * (i % 2 ? -1 : 1);
+    for (let k = 0; k < 3; k++) { a.beginPath(); a.arc(0, 0, r, s + k * 2.094, s + k * 2.094 + 1.3); a.stroke(); }
+  }
+  a.globalAlpha = 0.9; a.fillStyle = '#bff3ff';
+  a.beginPath(); a.arc(0, 0, 9 + 1.5 * Math.sin(t * 3), 0, Math.PI * 2); a.fill();
+  a.restore();
+  reactorTex.needsUpdate = true;
+}
+
+// the KA009 filament in the mouth groove: capsule outline on the r128.5 groove floor
+let mouthCore = null, mouthHalo = null;
+function addMouth() {
+  const R = 106.25, CY = 158.25, TH = 30 * Math.PI / 180, H = 6, RG = 128.5;
+  const pts2 = [];
+  const a0 = -Math.PI / 2 - TH, a1 = -Math.PI / 2 + TH;
+  const N = 90;
+  for (let i = 0; i <= N; i++) { const a = a0 + (a1 - a0) * i / N; pts2.push([(R + H) * Math.cos(a), CY + (R + H) * Math.sin(a)]); }
+  const e1 = [R * Math.cos(a1), CY + R * Math.sin(a1)];
+  for (let i = 1; i < 24; i++) { const b = a1 + Math.PI * i / 24; pts2.push([e1[0] + H * Math.cos(b), e1[1] + H * Math.sin(b)]); }
+  for (let i = 0; i <= N; i++) { const a = a1 - (a1 - a0) * i / N; pts2.push([(R - H) * Math.cos(a), CY + (R - H) * Math.sin(a)]); }
+  const e0 = [R * Math.cos(a0), CY + R * Math.sin(a0)];
+  for (let i = 1; i < 24; i++) { const b = a0 + Math.PI + Math.PI * i / 24; pts2.push([e0[0] + H * Math.cos(b), e0[1] + H * Math.sin(b)]); }
+  const pts = pts2.map(([s, y]) => {
+    const phi = s / 128;
+    const px = RG * Math.sin(phi), pz = RG * Math.cos(phi);
+    return new THREE.Vector3(pz / 1000, px / 1000, (y + 66.7) / 1000);
+  });
+  const curve = new THREE.CatmullRomCurve3(pts, true);
+  mouthCore = new THREE.Mesh(new THREE.TubeGeometry(curve, 420, 0.0006, 8, true), new THREE.MeshBasicMaterial({ color: 0xffd79a }));
+  mouthHalo = new THREE.Mesh(new THREE.TubeGeometry(curve, 420, 0.0022, 10, true),
+    new THREE.MeshBasicMaterial({ color: 0xffb347, transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false }));
+  robot.links.base_link.add(mouthCore, mouthHalo);
+  setMouth(Number($('mouth').value));
+}
+function setMouth(v) {
+  if (!mouthCore) return;
+  mouthCore.visible = mouthHalo.visible = v > 0.01;
+  mouthCore.material.color.setRGB(1.0 * (0.25 + 0.75 * v), 0.84 * (0.25 + 0.75 * v), 0.6 * (0.25 + 0.75 * v));
+  mouthHalo.material.opacity = 0.45 * v;
+  $('mouth-out').textContent = Math.round(v * 100) + '%';
+}
+
+// ---------- controls ----------
+const sliders = {};
+function jointRow(parent, jname, label, sub, lo, hi, unit) {
+  const row = document.createElement('div');
+  row.className = 'joint';
+  row.innerHTML = `<label for="${jname}">${label}<small>${sub}</small></label>
+    <input type="range" id="${jname}" min="${lo}" max="${hi}" step="0.001" value="0"><output>0°</output>`;
+  parent.appendChild(row);
+  const input = row.querySelector('input'), out = row.querySelector('output');
+  sliders[jname] = { input, out, row, unit };
+  input.addEventListener('input', () => {
+    setJoint(jname, Number(input.value));
+    if ($('mirror').checked && jname.startsWith('L_')) {
+      const k = jname.slice(2);
+      setJoint('R_' + k, Number(input.value) * MIRROR[k]);
+    }
+    stopWave();
+  });
+  return row;
+}
+function buildArmControls(side) {
+  const box = $('arm-' + side);
+  ['j1', 'j2', 'j3', 'j4', 'j5', 'j6', 'j7', 'gripper'].forEach((k, i) => {
+    const j = robot.joints[`${side}_${k}`];
+    jointRow(box, `${side}_${k}`, k === 'gripper' ? 'Gripper' : `${k.toUpperCase()} · ${JOINT_INFO[k]}`, `servo ID ${ID_BASE[side] + i}`, j.limit.lower, j.limit.upper);
+  });
+}
+function buildNeckControls() {
+  const box = $('neck');
+  const p = robot.joints.neck_pan, t = robot.joints.neck_tilt;
+  box.prepend(jointRow(document.createElement('div'), 'neck_tilt', 'Tilt', 'nod · up is +', t.limit.lower, t.limit.upper));
+  box.prepend(jointRow(document.createElement('div'), 'neck_pan', 'Pan', 'turn · left is +', p.limit.lower, p.limit.upper));
+}
+function setJoint(name, v) {
+  const j = robot.joints[name];
+  if (!j) return;
+  if (j.limit && j.jointType !== 'continuous') v = Math.min(j.limit.upper, Math.max(j.limit.lower, v));
+  j.setJointValue(v);
+  const s = sliders[name];
+  if (s) {
+    s.input.value = v;
+    s.out.textContent = name.endsWith('gripper') ? `${Math.round(v / 2.2028 * 100)}%` : `${Math.round(v * DEG)}°`;
+  }
+  dirty = true;
+}
+function setPose(key) {
+  const p = POSES[key];
+  for (const k in p) { setJoint('L_' + k, p[k]); setJoint('R_' + k, p[k] * MIRROR[k]); }
+  stopWave();
+}
+document.querySelectorAll('[data-pose]').forEach((b) => b.addEventListener('click', () => setPose(b.dataset.pose)));
+let waving = false, waveT = 0;
+function stopWave() { waving = false; $('wave').setAttribute('aria-pressed', 'false'); }
+$('wave').addEventListener('click', () => {
+  if (waving) { stopWave(); return; }
+  setPose('rest');
+  const p = POSES.up;
+  for (const k in p) setJoint('R_' + k, p[k] * MIRROR[k]);
+  waving = true; waveT = 0; $('wave').setAttribute('aria-pressed', 'true');
+});
+$('mouth').addEventListener('input', (e) => setMouth(Number(e.target.value)));
+$('covers').addEventListener('input', (e) => {
+  const v = Number(e.target.value);
+  for (const m of coverMeshes) { m.material.transparent = v < 0.999; m.material.opacity = v; m.material.depthWrite = v > 0.5; m.castShadow = v > 0.5; }
+  $('covers-out').textContent = Math.round(v * 100) + '%';
+});
+$('highlight').addEventListener('change', () => { dirty = true; });
+$('show-room').addEventListener('change', (e) => { room.visible = e.target.checked; dirty = true; });
+$('show-scan').addEventListener('change', (e) => { scanPoints.visible = e.target.checked; dirty = true; });
+$('speed').addEventListener('input', (e) => { $('speed-out').textContent = Number(e.target.value).toFixed(2); });
+$('home').addEventListener('click', () => { pose.x = pose.z = pose.yaw = 0; placeRig(); setView('iso'); });
+
+// ---------- camera ----------
+function robotPoint(x, y, z) { // robot-frame metres (three axes: +x forward, +y up, -z left) -> world
+  return new THREE.Vector3(x, y, z).applyAxisAngle(new THREE.Vector3(0, 1, 0), pose.yaw).add(new THREE.Vector3(pose.x, 0, pose.z));
+}
+const VIEWS = {
+  iso: [0.78, 0.52, -0.72], front: [1.35, 0.32, 0.0], side: [0.0, 0.35, -1.4], back: [-1.35, 0.4, 0.0], top: [0.001, 1.75, 0.0],
+};
+function setView(name) {
+  const v = VIEWS[name];
+  controls.target.copy(robotPoint(0.02, 0.2, 0));
+  camera.position.copy(robotPoint(v[0], v[1], v[2]));
+  controls.update();
+}
+document.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => setView(b.dataset.view)));
+function cameraText() {
+  const p = camera.position, t = controls.target;
+  const f = (v) => Math.round(v * 1000);
+  return `pos ${f(p.x)}, ${f(p.y)}, ${f(p.z)} mm · tgt ${f(t.x)}, ${f(t.y)}, ${f(t.z)} mm`;
+}
+$('copy-view').addEventListener('click', () => {
+  const text = cameraText();
+  const ok = () => { $('copy-state').textContent = 'Copied'; };
+  const fail = () => { $('copy-state').textContent = 'Select the line above and copy it'; };
+  try { navigator.clipboard.writeText(text).then(ok, fail); } catch { fail(); }
+});
+
+// ---------- drive ----------
+const held = new Set();
+const KEYMAP = { KeyW: 'up', ArrowUp: 'up', KeyS: 'down', ArrowDown: 'down', KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right' };
+window.addEventListener('keydown', (e) => {
+  if (e.target.closest && e.target.closest('input, textarea')) return;
+  const k = KEYMAP[e.code]; if (k) { held.add(k); e.preventDefault(); }
+});
+window.addEventListener('keyup', (e) => { const k = KEYMAP[e.code]; if (k) held.delete(k); });
+window.addEventListener('blur', () => held.clear());
+document.querySelectorAll('[data-drive]').forEach((b) => {
+  const k = b.dataset.drive;
+  b.addEventListener('pointerdown', (e) => { held.add(k); b.setPointerCapture(e.pointerId); });
+  for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) b.addEventListener(ev, () => held.delete(k));
+});
+const RADIUS = 0.2;
+const blockers = [];
+room.traverse((o) => { if (o.isMesh) { o.updateMatrixWorld(); const b = new THREE.Box3().setFromObject(o); if (b.min.y < 0.3) blockers.push(b); } });
+function freeAt(x, z) {
+  if (x < ROOM.x0 + RADIUS || x > ROOM.x1 - RADIUS || z < ROOM.z0 + RADIUS || z > ROOM.z1 - RADIUS) return false;
+  for (const b of blockers) {
+    if (b.max.x - b.min.x > 3) continue; // walls handled above
+    const cx = Math.max(b.min.x, Math.min(x, b.max.x)), cz = Math.max(b.min.z, Math.min(z, b.max.z));
+    if ((cx - x) ** 2 + (cz - z) ** 2 < RADIUS * RADIUS) return false;
+  }
+  return true;
+}
+function placeRig() {
+  rig.position.set(pose.x, 0, pose.z);
+  rig.rotation.y = pose.yaw;
+  setJoint('wheel_left', wheels.l); setJoint('wheel_right', wheels.r);
+  $('odo').textContent = `x ${pose.x.toFixed(2)} m · y ${(-pose.z).toFixed(2)} m · heading ${Math.round(((pose.yaw * DEG) % 360 + 360) % 360)}°`;
+  dirty = true;
+}
+function drive(dt) {
+  if (!held.size || !robot) return;
+  const vmax = Number($('speed').value);
+  const v = ((held.has('up') ? 1 : 0) - (held.has('down') ? 1 : 0)) * vmax;
+  const w = ((held.has('left') ? 1 : 0) - (held.has('right') ? 1 : 0)) * 1.6;
+  const yaw = pose.yaw + w * dt;
+  const nx = pose.x + v * Math.cos(yaw) * dt, nz = pose.z - v * Math.sin(yaw) * dt;
+  const before = new THREE.Vector3(pose.x, 0, pose.z);
+  pose.yaw = yaw;
+  if (freeAt(nx, nz)) { pose.x = nx; pose.z = nz; }
+  wheels.l += (v - w * TRACK / 2) / WHEEL_R * dt;
+  wheels.r += (v + w * TRACK / 2) / WHEEL_R * dt;
+  placeRig();
+  if ($('chase').checked) {
+    const d = new THREE.Vector3(pose.x, 0, pose.z).sub(before);
+    camera.position.add(d); controls.target.add(d);
+  }
+}
+
+// ---------- neck follows the camera ----------
+const tmpV = new THREE.Vector3();
+function followCamera() {
+  if (!$('follow').checked || !robot) return;
+  const pan = robot.links.neck_pan;
+  pan.parent.updateMatrixWorld();
+  const local = pan.parent.worldToLocal(tmpV.copy(camera.position));   // neck_pan joint frame, before its rotation
+  const jp = robot.joints.neck_pan.position;
+  const dx = local.x - jp.x, dy = local.y - jp.y, dz = local.z - jp.z;
+  setJoint('neck_pan', Math.atan2(dy, dx));
+  setJoint('neck_tilt', Math.atan2(dz - 0.012, Math.hypot(dx, dy)));
+}
+
+// ---------- contacts ----------
+const boxCache = new Map();
+const m4 = new THREE.Matrix4();
+const RED = new THREE.Color(0xd23b3f), BLACK = new THREE.Color(0x000000);
+let lastHits = [];
+function worldBox(m) {
+  let b = boxCache.get(m); if (!b) { b = new THREE.Box3(); boxCache.set(m, b); }
+  return b.copy(m.geometry.boundingBox).applyMatrix4(m.matrixWorld);
+}
+function belowFloor(m) {
+  const pos = m.geometry.attributes.position; const e = m.matrixWorld.elements;
+  for (let i = 0; i < pos.count; i += 3) {
+    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    if (e[1] * x + e[5] * y + e[9] * z + e[13] < -0.0005) return true;
+  }
+  return false;
+}
+function checkContacts() {
+  rig.updateMatrixWorld(true);
+  const hits = [];
+  const all = [...armMeshes.L, ...armMeshes.R];
+  for (const m of [...all, ...bodyMeshes]) worldBox(m);
+  for (const a of all) {
+    const ba = boxCache.get(a);
+    for (const b of bodyMeshes) {
+      if (!ba.intersectsBox(boxCache.get(b))) continue;
+      m4.copy(b.matrixWorld).invert().multiply(a.matrixWorld);
+      if (b.geometry.boundsTree.intersectsGeometry(a.geometry, m4)) hits.push([a, b]);
+    }
+    if (ba.min.y < 0 && belowFloor(a)) hits.push([a, null]);
+  }
+  for (const a of armMeshes.L) {
+    for (const c of armMeshes.R) {
+      if (!boxCache.get(a).intersectsBox(boxCache.get(c))) continue;
+      m4.copy(c.matrixWorld).invert().multiply(a.matrixWorld);
+      if (c.geometry.boundsTree.intersectsGeometry(a.geometry, m4)) hits.push([a, c]);
+    }
+  }
+  lastHits = hits;
+  const paint = $('highlight').checked;
+  const touched = new Set();
+  for (const [a, b] of hits) { touched.add(a); if (b) touched.add(b); }
+  for (const m of [...all, ...bodyMeshes]) m.material.emissive.copy(paint && touched.has(m) ? RED : BLACK).multiplyScalar(0.55);
+  for (const s of Object.values(sliders)) s.row.classList.remove('hit');
+  for (const m of touched) {
+    const ln = m.userData.link;
+    if (!/^[LR]_/.test(ln)) continue;
+    let j = robot.links[ln].parent; // the joint that moves this part
+    while (j && !(j.isURDFJoint && j.jointType !== 'fixed')) j = j.parent;
+    if (j && sliders[j.name]) sliders[j.name].row.classList.add('hit');
+  }
+  const box = $('contacts'), chip = $('chip-clash');
+  if (!hits.length) {
+    box.className = 'contacts';
+    box.innerHTML = '<h2>Contacts</h2><p>None. Every arm part clears the body, the other arm and the floor.</p>';
+    chip.className = 'chip'; chip.lastChild.textContent = 'Arms clear';
+  } else {
+    const uniq = [...new Set(hits.map(([a, b]) => `${a.userData.label} ↔ ${b ? b.userData.label : 'floor'}`))];
+    box.className = 'contacts bad';
+    box.innerHTML = `<h2>${uniq.length} contact${uniq.length > 1 ? 's' : ''}</h2><ul>${uniq.slice(0, 8).map((u) => `<li>${u}</li>`).join('')}</ul>`;
+    chip.className = 'chip bad'; chip.lastChild.textContent = `${uniq.length} contact${uniq.length > 1 ? 's' : ''}`;
+  }
+}
+
+// ---------- lidar ----------
+const NRAYS = 360, RANGE = 6;
+const raycaster = new THREE.Raycaster();
+raycaster.firstHitOnly = true;
+raycaster.far = RANGE;
+const scanGeom = new THREE.BufferGeometry();
+scanGeom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(NRAYS * 3), 3));
+scanGeom.setAttribute('color', new THREE.BufferAttribute(new Float32Array(NRAYS * 3), 3));
+const scanPoints = new THREE.Points(scanGeom, new THREE.PointsMaterial({ size: 0.02, vertexColors: true, sizeAttenuation: true }));
+scanPoints.frustumCulled = false;
+scene.add(scanPoints);
+const scan = new Float32Array(NRAYS).fill(Infinity);
+const scanSelf = new Uint8Array(NRAYS);
+let lidarBlocked = 0;
+const origin = new THREE.Vector3(), dir = new THREE.Vector3();
+function runLidar() {
+  if (!lidarOrigin) return;
+  rig.updateMatrixWorld(true);
+  lidarOrigin.getWorldPosition(origin);
+  const targets = [...(room.visible ? room.children : []), ...selfMeshes];
+  const P = scanGeom.attributes.position.array, C = scanGeom.attributes.color.array;
+  const amber = cssColor('--accent'), red = new THREE.Color(0xff4d4f);
+  lidarBlocked = 0;
+  for (let i = 0; i < NRAYS; i++) {
+    const a = pose.yaw + i * Math.PI / 180;
+    dir.set(Math.cos(a), 0, -Math.sin(a));
+    raycaster.set(origin, dir);
+    const hit = raycaster.intersectObjects(targets, false)[0];
+    const self = !!(hit && hit.object.userData.label && hit.object.parent && linkOf(hit.object));
+    scan[i] = hit ? hit.distance : Infinity;
+    scanSelf[i] = self ? 1 : 0;
+    if (self) lidarBlocked++;
+    const p = hit ? hit.point : origin.clone().addScaledVector(dir, 0.0);
+    P[i * 3] = p.x; P[i * 3 + 1] = hit ? p.y : -10; P[i * 3 + 2] = p.z;
+    const c = self ? red : amber; C[i * 3] = c.r; C[i * 3 + 1] = c.g; C[i * 3 + 2] = c.b;
+  }
+  scanGeom.attributes.position.needsUpdate = true; scanGeom.attributes.color.needsUpdate = true;
+  const chip = $('chip-lidar');
+  chip.className = lidarBlocked ? 'chip bad' : 'chip';
+  chip.lastChild.textContent = lidarBlocked ? `Lidar: gerdoo blocks ${lidarBlocked}°` : 'Lidar sees 360°';
+  const seen = [...scan].filter((d) => d < Infinity && d > 0.25);
+  $('lidar-readout').textContent = `${lidarBlocked}° blocked by gerdoo · nearest object ${seen.length ? Math.min(...seen).toFixed(2) + ' m' : 'none'} · scan height ${(origin.y * 1000).toFixed(0)} mm`;
+  drawScan();
+}
+function drawScan() {
+  const c = $('scan'); const a = c.getContext('2d');
+  const W = c.width, R = W / 2, px = R / 2.6;   // 2.6 m to the edge
+  a.clearRect(0, 0, W, W);
+  const muted = getComputedStyle(document.documentElement).getPropertyValue('--line').trim();
+  const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
+  a.strokeStyle = muted; a.lineWidth = 2;
+  for (const r of [1, 2]) { a.beginPath(); a.arc(R, R, r * px, 0, Math.PI * 2); a.stroke(); }
+  a.beginPath(); a.moveTo(R, R - 14); a.lineTo(R + 9, R + 9); a.lineTo(R - 9, R + 9); a.closePath(); a.fillStyle = accent; a.fill();
+  for (let i = 0; i < NRAYS; i++) {
+    const d = scan[i]; if (!(d < 2.6)) continue;
+    const ang = i * Math.PI / 180;  // CCW from forward; forward is up on the map
+    const x = R - Math.sin(ang) * d * px, y = R - Math.cos(ang) * d * px;
+    a.fillStyle = scanSelf[i] ? '#ff4d4f' : accent;
+    a.fillRect(x - 2.5, y - 2.5, 5, 5);
+  }
+}
+
+// ---------- dock ----------
+let dockReady = false;
+new STLLoader().load('meshes/gerdoo/dock.stl', (g) => {
+  g.computeBoundsTree();
+  const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0x4a5561, roughness: 0.7 }));
+  const holder = new THREE.Group();
+  holder.rotation.x = -Math.PI / 2; holder.scale.setScalar(0.001);
+  holder.add(m); m.castShadow = true; m.receiveShadow = true;
+  const copper = new THREE.MeshStandardMaterial({ color: 0xc9824f, metalness: 0.8, roughness: 0.35 });
+  for (const y of [12, -12]) {
+    const plate = new THREE.Mesh(new THREE.BoxGeometry(1.0, 14, 26), copper);
+    plate.position.set(-130.55, y, 88.7);
+    holder.add(plate);
+  }
+  room.add(holder);
+  dockReady = true; dirty = true;
+});
+function dockState() {
+  const chip = $('chip-dock');
+  if (!dockReady) return;
+  const d = Math.hypot(pose.x, pose.z) * 1000, yaw = Math.abs(((pose.yaw * DEG + 540) % 360) - 180);
+  const on = d < 4 && yaw < 3;
+  chip.className = on ? 'chip' : 'chip warn';
+  chip.lastChild.textContent = on ? 'Charging on the dock' : `Off the dock · ${(d / 1000).toFixed(2)} m`;
+}
+
+// ---------- stability ----------
+const cogMat = new THREE.MeshBasicMaterial({ color: 0xffae1e, depthTest: false });
+const cogBall = new THREE.Mesh(new THREE.SphereGeometry(0.009, 20, 14), cogMat);
+cogBall.renderOrder = 10;
+const cogDrop = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]),
+  new THREE.LineDashedMaterial({ color: 0xffae1e, dashSize: 0.01, gapSize: 0.006, depthTest: false }));
+cogDrop.renderOrder = 10;
+const cogFoot = new THREE.Mesh(new THREE.RingGeometry(0.008, 0.013, 24), new THREE.MeshBasicMaterial({ color: 0xffae1e, side: THREE.DoubleSide, depthTest: false }));
+cogFoot.rotation.x = -Math.PI / 2; cogFoot.renderOrder = 10;
+const POLY = [[90, 0], [0, 145.65], [-90, 0], [0, -145.65]];
+const polyLine = new THREE.LineLoop(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0x3fc07a, depthTest: false }));
+polyLine.renderOrder = 9;
+scene.add(cogBall, cogDrop, cogFoot, polyLine);
+function edgeMargins(x, y) {
+  const out = [];
+  for (let i = 0; i < 4; i++) {
+    const [x1, y1] = POLY[i], [x2, y2] = POLY[(i + 1) % 4];
+    const ex = x2 - x1, ey = y2 - y1, L = Math.hypot(ex, ey);
+    out.push(((x - x1) * -ey + (y - y1) * ex) / L);
+  }
+  return out;
+}
+function accelLimit(c, dx, dy) {
+  let lo = 0, hi = 3;
+  for (let i = 0; i < 50; i++) { const mid = (lo + hi) / 2; if (Math.min(...edgeMargins(c.x + dx * c.z * mid, c.y + dy * c.z * mid)) > 0) lo = mid; else hi = mid; }
+  return lo;
+}
+const tv = new THREE.Vector3(), tv2 = new THREE.Vector3();
+function updateStability() {
+  if (!robot) return;
+  rig.updateMatrixWorld(true);
+  let M = MASS.body.mass_g;
+  const acc = new THREE.Vector3(...MASS.body.cog_mm.map((v) => v / 1000)).applyMatrix4(robot.matrixWorld).multiplyScalar(M);
+  for (const side of ['L', 'R']) {
+    for (const [name, [m, x, y, z]] of Object.entries(MASS.links)) {
+      const link = robot.links[`${side}_${name}`]; if (!link) continue;
+      acc.addScaledVector(tv.set(x, y, z).applyMatrix4(link.matrixWorld), m); M += m;
+    }
+    if ($('payload').checked) {
+      const a = robot.links[`${side}_Gripper_Base_v1_1`].getWorldPosition(tv), b = robot.links[`${side}_ST3215_8_v1_1`].getWorldPosition(tv2);
+      const tip = b.clone().add(b.clone().sub(a).normalize().multiplyScalar(0.05));
+      acc.addScaledVector(tip, 250); M += 250;
+    }
+  }
+  const cw = acc.divideScalar(M);
+  const local = robot.worldToLocal(cw.clone()).multiplyScalar(1000);   // URDF frame, mm
+  const margins = edgeMargins(local.x, local.y);
+  const brake = accelLimit(local, 1, 0), accel = accelLimit(local, -1, 0), turn = Math.min(accelLimit(local, 0, 1), accelLimit(local, 0, -1));
+  const show = $('show-cog').checked;
+  cogBall.visible = cogDrop.visible = cogFoot.visible = polyLine.visible = show;
+  cogBall.position.copy(cw);
+  const foot = cw.clone(); foot.y = 0.002;
+  cogDrop.geometry.setFromPoints([cw, foot]); cogDrop.computeLineDistances();
+  cogFoot.position.copy(foot);
+  polyLine.geometry.setFromPoints(POLY.map(([x, y]) => robot.localToWorld(new THREE.Vector3(x / 1000, y / 1000, 0.002))));
+  const min = Math.min(...margins);
+  const vmax = Number($('speed').value);
+  const stop = vmax * vmax / (2 * brake * 9.81) * 1000;
+  $('tip-readout').innerHTML = `mass ${(M / 1000).toFixed(2)} kg · CoG ${local.x.toFixed(0)} mm forward, ${local.z.toFixed(0)} mm up<br>` +
+    `margin to the nearest tipping edge ${min.toFixed(0)} mm<br>` +
+    `tips forward when braking above ${brake.toFixed(2)} g · back when accelerating above ${accel.toFixed(2)} g · sideways in a turn above ${turn.toFixed(2)} g<br>` +
+    `shortest stop from ${vmax.toFixed(2)} m/s without tipping: ${stop.toFixed(0)} mm`;
+  const chip = $('chip-tip');
+  chip.className = brake < 0.2 ? 'chip bad' : brake < 0.35 ? 'chip warn' : 'chip';
+  chip.lastChild.textContent = `Brake limit ${brake.toFixed(2)} g`;
+  polyLine.material.color.set(brake < 0.2 ? 0xff5d61 : 0x3fc07a);
+  lastStability = { brake, accel, turn, min, cog: [local.x, local.y, local.z], M };
+}
+let lastStability = null;
+$('payload').addEventListener('change', () => { dirty = true; });
+$('show-cog').addEventListener('change', () => { dirty = true; });
+
+// ---------- loop ----------
+let dirty = true, lastLidar = 0, lastContacts = 0;
+const clock = new THREE.Clock();
+function resize() {
+  const r = canvas.getBoundingClientRect();
+  const w = Math.max(1, Math.round(r.width)), h = Math.max(1, Math.round(r.height));
+  if (canvas.width !== Math.round(w * renderer.getPixelRatio()) || canvas.height !== Math.round(h * renderer.getPixelRatio())) {
+    renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+  }
+}
+new ResizeObserver(resize).observe(canvas);
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+function frame() {
+  const dt = Math.min(clock.getDelta(), 0.05), t = clock.elapsedTime;
+  if (robot && !$('loading').hidden === false) {
+    drive(dt);
+    if (waving) { waveT += dt; setJoint('R_j4', POSES.up.j4 + 0.45 * Math.sin(waveT * 2 * Math.PI * 1.4)); }
+    followCamera();
+    drawFace(reduceMotion ? 0 : t);
+    drawReactor(reduceMotion ? 0 : t);
+    const now = performance.now();
+    if (dirty && now - lastContacts > 60) { checkContacts(); updateStability(); dockState(); lastContacts = now; dirty = false; lidarDirty = true; }
+    if ($('show-scan').checked && (lidarDirty || held.size) && now - lastLidar > 90) { runLidar(); lastLidar = now; lidarDirty = false; }
+    $('camera-readout').textContent = cameraText();
+  }
+  controls.update();
+  sun.position.copy(controls.target).add(new THREE.Vector3(1.6, 3.2, 1.2));
+  sun.target.position.copy(controls.target);
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+let lidarDirty = true;
+controls.addEventListener('change', () => { if ($('follow').checked) dirty = true; });
+applyTheme();
+resize();
+requestAnimationFrame(frame);
+
+// ---------- self test (open with #selftest) ----------
+function runSelfTest() {
+  const out = {};
+  for (const k of Object.keys(POSES)) {
+    setPose(k);
+    robot.updateMatrixWorld(true);
+    checkContacts(); runLidar();
+    updateStability();
+    out[k] = { contacts: [...new Set(lastHits.map(([a, b]) => `${a.userData.label} <> ${b ? b.userData.label : 'floor'}`))], lidarBlocked, brake: +lastStability.brake.toFixed(2), cog: lastStability.cog.map((v) => Math.round(v)), mass: Math.round(lastStability.M) };
+  }
+  const crash = {
+    sweep_inward: { L_j1: -1.5, L_j2: 0.9, L_j3: 0.9 },
+    fold_down: { L_j2: 1.61, L_j3: 1.7, L_j4: 1.2 },
+    cross_arms: { L_j1: -1.0, L_j2: 0.6, L_j3: -0.3, R_j1: 1.0, R_j2: 0.6, R_j3: -0.3 },
+  };
+  for (const [k, q] of Object.entries(crash)) {
+    setPose('rest');
+    for (const [j, v] of Object.entries(q)) setJoint(j, v);
+    robot.updateMatrixWorld(true);
+    checkContacts();
+    out['test_' + k] = { contacts: [...new Set(lastHits.map(([a, b]) => `${a.userData.label} <> ${b ? b.userData.label : 'floor'}`))] };
+  }
+  setPose('rest'); checkContacts(); runLidar();
+  const pre = document.createElement('pre');
+  pre.id = 'selftest-result'; pre.hidden = true;
+  pre.textContent = JSON.stringify({ meshes: { L: armMeshes.L.length, R: armMeshes.R.length, body: bodyMeshes.length }, poses: out });
+  document.body.appendChild(pre);
+  document.title = 'SELFTEST DONE';
+}
+</script>
