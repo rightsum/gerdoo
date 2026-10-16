@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Date** | 2026-10-15 |
+| **Date** | 2026-10-15/16 |
 | **Type** | Bring-up — two ElRobot follower arms through the Teensy |
-| **Status** | ✅ All 16 servos answer with unique IDs (left 1–8, right 11–18) · ✅ Read-only bus tooling · ✅ Both arms on the control panel · 🔄 Calibration (centre + range) and per-arm strength still to do |
+| **Status** | ✅ 16 servos with unique IDs · ✅ Both arms on the control panel · ✅ Multi-turn mode on all 16 (the encoder rollover sat inside most joints' travel) · ✅ Left arm calibrated except the gripper · 🔄 Right arm calibration, both grippers, and a first full test move |
 | **Severity** | Medium — the arms were unaddressable as delivered, and the first moves strained two joints |
 
 ---
@@ -206,17 +206,133 @@ J8 (3944); right J5 (≈60).
   confirmation went missing. The servo was fine. The cards must be closed
   while scanning.
 
+## 2026-10-16 — the seam, calibration, and an encoder rollover inside the travel
+
+### A seam guard
+
+Right J6, moved about 5 % along its slider near the top, suddenly read near
+the bottom. It was then pinned at 30 % load and heating (42 °C from 35).
+It had crossed 4095→0. The servo then saw its target 3,100 steps away, took
+the long way round, and stopped against its mechanical stop. A first guard
+went into the firmware:
+
+- **MOVE refuses** anything more than half a turn (2048 steps) from where the
+  joint is.
+- **A 200 ms watchdog** resets the goal of any holding joint more than half a
+  turn from its goal to where it is.
+
+### Calibration, and a first attempt that half-applied
+
+ElRobot's URDF (`hardware/elrobot/simulation/elrobot_follower.urdf`) gives
+each joint its real span. J1–J4 and J6 cover about 180–200°, the two wrist
+rolls about 336–340°, and the gripper 126°. That is far less than the
+sliders' full turn. The panel gained **Calibrate…**:
+
+1. Move each joint by hand from end stop to end stop. The tracking follows the
+   reading correctly through 0/4095.
+2. Check each span against the URDF.
+3. Write a homing offset so the middle of the range reads 2048, plus the
+   range itself. (Reading = actual − offset, per LeRobot's driver for these
+   servos.)
+
+**The first save rolled back seven of eight joints and left six
+half-written:**
+
+- My check read the position 20 ms after writing the offset. The servo
+  applies an offset with a delay, so the reading hadn't moved yet.
+- The firmware took that as a failed write and rolled back.
+- The rollback's limits landed, but its offset write was dropped. J2–J7 ended
+  up with new offsets and no limits.
+
+Fixed:
+
+- **The writes are spaced out.**
+- **Every register is read back** rather than trusting the status reply.
+- **The reading gets up to 500 ms to follow.**
+
+The second pass calibrated J1–J7 at **88–100 %** of the URDF spans. The
+gripper barely moves by hand through its 1:345 gearbox, so it was skipped.
+
+### The encoder rollover is inside the travel, on six of seven joints
+
+After calibration, left J7 was nudged about 120 steps on its slider and drove
+to its end stop instead:
+
+| | Value |
+|---|---|
+| Goal | 2283 (slider) |
+| Display reading | 2165 |
+| Offset | +1962 |
+
+**The servo controls in its own frame,** `raw − offset`, where `raw` is the
+encoder's 0–4095 count. That frame has a discontinuity where the encoder
+rolls over. Calibration moves the *display* seam, not that rollover. For J7
+it sat at display ≈2134, inside its travel. J7 was just past it, so its
+internal position was −1931 and the goal 4,214 steps away.
+
+Reading every joint's offset showed the rollover inside the travel on J2,
+J3, J5, J6 and J7, with J4 marginal. The servos had been mounted wherever
+their encoders happened to point. ElRobot/LeRobot assembly centres each servo
+first.
+
+**Remounting means disassembly, so a software route was tested instead,** on
+left J7, the lightest joint. Its original registers were saved first, to
+`~/cam-firmware/left_J7_before_multiturn.txt` on the robot.
+
+1. **Multi-turn feedback.** Set Phase bit 4 and angle limits 0/0, keeping
+   mode 0. J7's reading changed from 2254 to **−1842**: the same spot, now
+   unwrapped. Turned by hand through the old rollover both ways, 135 samples
+   counted **continuously**: −2497…−1179, no jump over 1500.
+2. **A powered move through it.** 25 % torque, auto-off after 2.5 s.
+   - **The first try did nothing.** Torque had not come on, and the code
+     never checked. The test now reads torque back after enabling it.
+   - **Then it worked both ways:**
+
+     | Move | Path | Time | Load |
+     |---|---|---|---|
+     | −1890 → −2088 | through −1962, the old rollover | 0.8 s | 7–10 % |
+     | −2088 → −1890 | back through it | 0.9 s | 6–10 % |
+
+   The ESPHome STS3215 project uses the same Phase bit with Mode 3, which
+   takes relative steps. Mode 0 with multi-turn feedback keeps absolute
+   goals and was enough.
+
+### The rollout
+
+- **Every servo is in multi-turn mode:** Phase bit 4 on, angle limits 0/0.
+  `ARM <side> MULTITURN` switches them, with read-back. The left arm's
+  calibrated limits moved into the Teensy's **EEPROM**: one record per servo
+  ID, with a checksum, loaded at boot. A restart was checked and kept them.
+- **The display reading is the servo's position mod 4096.** That is what the
+  panel shows and sends.
+- **A move becomes a distance from where the joint is now:**
+  `goal = present + (target − present display)`. That is the physical short
+  path from any turn count, including after a power cycle resets it.
+- **MOVE checks first:**
+  - It refuses a joint that isn't in multi-turn mode.
+  - It refuses a target outside the joint's limits.
+  - On an uncalibrated joint, it refuses moves of more than half a turn.
+- **CALIBRATE now switches the joint to multi-turn as part of saving.**
+- **Torque on/off is read back,** with up to three attempts.
+- **Strength:** a per-arm torque limit, 10–100 %, applied live. 30 % pinned
+  left J3 against gravity at 46 °C, so the joints that carry the arm need
+  roughly 60 %.
+- **Kept as diagnostics:** `BUS POS` (signed reading), `BUS WRITE`
+  (configuration registers only, torque must be off) and `JOINT TEST` (one
+  small low-torque move that switches itself off).
+
 ## Next
 
-1. **Calibration, both arms.** Pose each joint mid-travel and store that as
-   2048: Feetech's mid-point calibration writes 128 to the torque-enable
-   register. That moves every seam to the far side of the joint's range.
-   Then record each joint's real min/max by hand, and write them as the
-   servo's angle limits. The sliders become each joint's real range.
-2. **A per-arm Strength control** in place of the fixed 30 %: probably
-   50–70 % for the joints that carry the arm (J2–J4).
-3. **P gain 16.** ElRobot uses it against holding jitter; the factory value
-   is 32.
+1. **A full test move of the left arm** at about 60 % strength, including J7
+   through its old rollover.
+2. **Calibrate the right arm.** CALIBRATE switches each joint to multi-turn
+   as it saves.
+3. **Calibrate the grippers.** They can't be turned by hand, so this needs a
+   supervised powered sweep at low torque, stopping when the load rises.
+4. **P gain 16.** ElRobot uses it against holding jitter; the factory value is
+   32.
+5. **Pose-dependent collisions** (arm vs. body, table, the other arm) are not
+   covered by per-joint limits. That is MoveIt with the URDF, later.
 
 ## Takeaways
 
@@ -232,3 +348,13 @@ J8 (3944); right J5 (≈60).
    like it moved the arm.
 5. **Report state from the hardware, not from a flag.** The servos outlive the
    firmware's memory of them.
+6. **Calibration can move the number, not the encoder.** An offset relocates
+   where the reading wraps. The point where the servo's own count rolls over
+   is wherever the horn was fitted, and in single-turn mode no joint can be
+   driven through it.
+7. **Check the write you depend on.** A dropped torque write looked exactly
+   like "this mode doesn't work". A rollback with a dropped offset write left
+   six joints half-calibrated. Read back anything that matters.
+8. **Try the risky idea on the safest joint.** Multi-turn mode was proven on
+   the weightless wrist roll first, with its old registers saved and a test
+   that switches itself off.
