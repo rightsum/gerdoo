@@ -207,6 +207,164 @@
     <parent link="base_link" />
     <child link="lidar" />
   </joint>
+  <link name="caster_front_swivel">
+    <visual name="caster_front_plate">
+      <origin xyz="0 0 -0.001" rpy="0 0 0" />
+      <geometry>
+        <box size="0.03 0.03 0.002" />
+      </geometry>
+      <material name="m_caster_front_plate">
+        <color rgba="0.74 0.75 0.77 1" />
+      </material>
+    </visual>
+    <visual name="caster_front_bearing">
+      <origin xyz="0 0 -0.004" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.011" length="0.004" />
+      </geometry>
+      <material name="m_caster_front_bearing">
+        <color rgba="0.74 0.75 0.77 1" />
+      </material>
+    </visual>
+    <visual name="caster_front_fork_l">
+      <origin xyz="-0.005 0.0064 -0.015" rpy="0 0 0" />
+      <geometry>
+        <box size="0.018 0.0016 0.018" />
+      </geometry>
+      <material name="m_caster_front_fork_l">
+        <color rgba="0.74 0.75 0.77 1" />
+      </material>
+    </visual>
+    <visual name="caster_front_fork_r">
+      <origin xyz="-0.005 -0.0064 -0.015" rpy="0 0 0" />
+      <geometry>
+        <box size="0.018 0.0016 0.018" />
+      </geometry>
+      <material name="m_caster_front_fork_r">
+        <color rgba="0.74 0.75 0.77 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="caster_front_swivel" type="continuous">
+    <origin xyz="0.09 0 0.0365" rpy="0 0 0" />
+    <axis xyz="0 0 1" />
+    <parent link="base_link" />
+    <child link="caster_front_swivel" />
+  </joint>
+  <link name="caster_front_wheel">
+    <visual name="caster_front_tyre">
+      <origin xyz="0 0 0" rpy="1.570796 0 0" />
+      <geometry>
+        <cylinder radius="0.0125" length="0.01" />
+      </geometry>
+      <material name="m_caster_front_tyre">
+        <color rgba="0.13 0.13 0.14 1" />
+      </material>
+    </visual>
+    <visual name="caster_front_hub">
+      <origin xyz="0 0 0" rpy="1.570796 0 0" />
+      <geometry>
+        <cylinder radius="0.005" length="0.0112" />
+      </geometry>
+      <material name="m_caster_front_hub">
+        <color rgba="0.82 0.83 0.85 1" />
+      </material>
+    </visual>
+    <visual name="caster_front_spoke">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.01875 0.0104 0.0022" />
+      </geometry>
+      <material name="m_caster_front_spoke">
+        <color rgba="0.82 0.83 0.85 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="caster_front_wheel" type="continuous">
+    <origin xyz="-0.01 0 -0.024" rpy="0 0 0" />
+    <axis xyz="0 1 0" />
+    <parent link="caster_front_swivel" />
+    <child link="caster_front_wheel" />
+  </joint>
+  <link name="caster_back_swivel">
+    <visual name="caster_back_plate">
+      <origin xyz="0 0 -0.001" rpy="0 0 0" />
+      <geometry>
+        <box size="0.03 0.03 0.002" />
+      </geometry>
+      <material name="m_caster_back_plate">
+        <color rgba="0.74 0.75 0.77 1" />
+      </material>
+    </visual>
+    <visual name="caster_back_bearing">
+      <origin xyz="0 0 -0.004" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.011" length="0.004" />
+      </geometry>
+      <material name="m_caster_back_bearing">
+        <color rgba="0.74 0.75 0.77 1" />
+      </material>
+    </visual>
+    <visual name="caster_back_fork_l">
+      <origin xyz="-0.005 0.0064 -0.015" rpy="0 0 0" />
+      <geometry>
+        <box size="0.018 0.0016 0.018" />
+      </geometry>
+      <material name="m_caster_back_fork_l">
+        <color rgba="0.74 0.75 0.77 1" />
+      </material>
+    </visual>
+    <visual name="caster_back_fork_r">
+      <origin xyz="-0.005 -0.0064 -0.015" rpy="0 0 0" />
+      <geometry>
+        <box size="0.018 0.0016 0.018" />
+      </geometry>
+      <material name="m_caster_back_fork_r">
+        <color rgba="0.74 0.75 0.77 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="caster_back_swivel" type="continuous">
+    <origin xyz="-0.09 0 0.0365" rpy="0 0 0" />
+    <axis xyz="0 0 1" />
+    <parent link="base_link" />
+    <child link="caster_back_swivel" />
+  </joint>
+  <link name="caster_back_wheel">
+    <visual name="caster_back_tyre">
+      <origin xyz="0 0 0" rpy="1.570796 0 0" />
+      <geometry>
+        <cylinder radius="0.0125" length="0.01" />
+      </geometry>
+      <material name="m_caster_back_tyre">
+        <color rgba="0.13 0.13 0.14 1" />
+      </material>
+    </visual>
+    <visual name="caster_back_hub">
+      <origin xyz="0 0 0" rpy="1.570796 0 0" />
+      <geometry>
+        <cylinder radius="0.005" length="0.0112" />
+      </geometry>
+      <material name="m_caster_back_hub">
+        <color rgba="0.82 0.83 0.85 1" />
+      </material>
+    </visual>
+    <visual name="caster_back_spoke">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.01875 0.0104 0.0022" />
+      </geometry>
+      <material name="m_caster_back_spoke">
+        <color rgba="0.82 0.83 0.85 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="caster_back_wheel" type="continuous">
+    <origin xyz="-0.01 0 -0.024" rpy="0 0 0" />
+    <axis xyz="0 1 0" />
+    <parent link="caster_back_swivel" />
+    <child link="caster_back_wheel" />
+  </joint>
   <link name="L_base_link" />
   <link name="L_ST3215_1_v1_1">
     <visual name="L_ST3215_1_v1_1">

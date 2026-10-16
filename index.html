@@ -230,7 +230,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
         <label class="check"><input type="checkbox" id="payload"> 250 g in each gripper</label>
         <label class="check"><input type="checkbox" id="show-cog" checked> Show the centre of gravity and the support polygon</label>
         <div class="readout" id="tip-readout">—</div>
-        <p class="note">The robot stands on the two wheels and the front and back casters, a diamond 180 × 291 mm. Braking pushes the centre of gravity forward by its height × deceleration / g; the limit below is where it reaches the front caster. A swivel caster's wheel trails 10–20 mm behind its pivot, so treat the front limit as optimistic.</p>
+        <p class="note">The robot stands on the two drive wheels and two 1" swivel casters. Each caster wheel trails 10 mm behind its pivot and swings round as you drive, so the support diamond changes shape: after driving forward the front contact sits 80 mm ahead of the axle, after reversing 100 mm. Braking pushes the centre of gravity forward by its height × deceleration / g; the limit is where it reaches the front contact.</p>
       </div>
     </details>
 
@@ -270,6 +270,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
           <li><b>Contacts:</b> mesh-exact checks of every arm part against the body, the other arm and the floor. A part of one arm is not checked against the same arm, so J1 stops at ±88.9°, where its yoke meets the housing.</li>
           <li><b>Mass model:</b> printed parts from their Fusion volumes, arm links from the ElRobot URDF, the rest from datasheets or estimates (<code>sim/web/tools/physics.py</code>).</li>
           <li><b>Dock:</b> <code>charging-dock-v1</code>; the robot starts on it. Drive forward to leave, and back into it within 4 mm and 3° to charge.</li>
+          <li><b>Casters:</b> 1" soft-rubber swivel casters, 25 mm wheel, 10 mm trail (typical; measure yours). The listing's 37.8 mm height is 1.3 mm more than the gap under the caster blocks, so the sim fits them to 36.5 mm.</li>
           <li><b>Approximate:</b> the neck gimbal's two axes, the Brio, and the scan height. Wheels roll without slipping and there is no physics.</li>
         </ul>
       </div>
@@ -319,8 +320,12 @@ const BODY_NAMES = {
   electronics: 'electronics', sensors: 'ultrasonic pod', brain: 'Jetson + UPS', drive: 'drive motor', top: 'lidar holder',
   neck_static: 'neck base', antennas: 'antenna', wheel_left: 'left wheel', wheel_right: 'right wheel',
   neck_pan: 'neck', neck_tilt: 'face screen', lidar: 'lidar', armbase: 'arm base',
+  caster_front_swivel: 'front caster', caster_front_wheel: 'front caster', caster_back_swivel: 'back caster', caster_back_wheel: 'back caster',
 };
 const WHEEL_R = 0.03315, TRACK = 0.2913;
+// 1" swivel casters: pivots 90 mm ahead of and behind the axle, wheel r 12.5 mm trailing 10 mm
+const CASTERS = { front: { x: 0.09, theta: 0, spin: 0 }, back: { x: -0.09, theta: 0, spin: 0 } };
+const CASTER_R = 0.0125, CASTER_TRAIL = 0.010;
 // mass model: arm links from the ElRobot URDF inertials, the rest from tools/physics.py (Fusion volumes + parts list)
 const MASS = {"links":{"ST3215_1_v1_1":[31.91,4e-06,0.02269,-0.001424],"Joint_01_1":[36.02,0.000193,0.010535,-0.002903],"ST3215_2_v1_1":[31.91,-0.001424,-0.000194,0.022689],"Joint_02_1":[43.13,0.020187,-0.000361,0.040489],"ST3215_3_v1_1":[31.91,-0.001226,-0.000194,0.022701],"Joint_03_v1_1":[37.05,0.021383,0.002597,0.028573],"ST3215_4_v1_1":[31.91,-0.001424,0.022689,0.000219],"Joint_04_v1_1":[49.11,0.020415,0.046348,0.000473],"ST3215_5_v1_1":[31.91,0.000383,-0.001621,0.022431],"Joint_05_v1_1":[15.03,-0.001451,0.014886,0.000239],"ST3215_6_v1_1":[31.91,-0.001229,0.022701,1.8e-05],"Joint_06_v1_1":[37.28,0.020434,0.031977,0.000356],"ST3215_7_v1_1":[31.91,0.000373,-0.001426,0.022445],"Gripper_Base_v1_1":[46.9,0.000561,0.03192,-0.000595],"ST3215_8_v1_1":[31.91,-0.000546,-0.018926,-0.012206],"Gripper_Gear_v1_1":[2.48,6.4e-05,0.003756,-3.4e-05],"Gripper_Jaw_02_v1_1":[12.49,-0.338681,0.262592,-0.030317],"Gripper_Jaw_01_v1_1":[12.49,-0.279442,0.305316,0.04628]},"body":{"mass_g":4423,"cog_mm":[-1.9,0.3,123.1]}};
 
@@ -743,6 +748,18 @@ function drive(dt) {
   if (freeAt(nx, nz)) { pose.x = nx; pose.z = nz; }
   wheels.l += (v - w * TRACK / 2) / WHEEL_R * dt;
   wheels.r += (v + w * TRACK / 2) / WHEEL_R * dt;
+  for (const [name, c] of Object.entries(CASTERS)) {
+    // the pivot moves at (v, w * x) in the robot frame; the wheel swings round to trail behind it
+    const vx = v, vy = w * c.x, speed = Math.hypot(vx, vy);
+    if (speed > 1e-4) {
+      const target = Math.atan2(vy, vx);
+      let d = target - c.theta; d = Math.atan2(Math.sin(d), Math.cos(d));
+      c.theta += d * Math.min(1, dt * 10);
+      c.spin += speed * Math.cos(d) / CASTER_R * dt;
+    }
+    setJoint(`caster_${name}_swivel`, c.theta);
+    setJoint(`caster_${name}_wheel`, c.spin);
+  }
   placeRig();
   if ($('chase').checked) {
     const d = new THREE.Vector3(pose.x, 0, pose.z).sub(before);
@@ -924,7 +941,9 @@ const cogDrop = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THR
 cogDrop.renderOrder = 10;
 const cogFoot = new THREE.Mesh(new THREE.RingGeometry(0.008, 0.013, 24), new THREE.MeshBasicMaterial({ color: 0xffae1e, side: THREE.DoubleSide, depthTest: false }));
 cogFoot.rotation.x = -Math.PI / 2; cogFoot.renderOrder = 10;
-const POLY = [[90, 0], [0, 145.65], [-90, 0], [0, -145.65]];
+let POLY = [[90, 0], [0, 145.65], [-90, 0], [0, -145.65]];
+function casterContact(c) { return [(c.x - CASTER_TRAIL * Math.cos(c.theta)) * 1000, -CASTER_TRAIL * Math.sin(c.theta) * 1000]; }
+function updatePoly() { POLY = [casterContact(CASTERS.front), [0, 145.65], casterContact(CASTERS.back), [0, -145.65]]; }
 const polyLine = new THREE.LineLoop(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0x3fc07a, depthTest: false }));
 polyLine.renderOrder = 9;
 scene.add(cogBall, cogDrop, cogFoot, polyLine);
@@ -961,6 +980,7 @@ function updateStability() {
   }
   const cw = acc.divideScalar(M);
   const local = robot.worldToLocal(cw.clone()).multiplyScalar(1000);   // URDF frame, mm
+  updatePoly();
   const margins = edgeMargins(local.x, local.y);
   const brake = accelLimit(local, 1, 0), accel = accelLimit(local, -1, 0), turn = Math.min(accelLimit(local, 0, 1), accelLimit(local, 0, -1));
   const show = $('show-cog').checked;
@@ -976,7 +996,9 @@ function updateStability() {
   $('tip-readout').innerHTML = `mass ${(M / 1000).toFixed(2)} kg · CoG ${local.x.toFixed(0)} mm forward, ${local.z.toFixed(0)} mm up<br>` +
     `margin to the nearest tipping edge ${min.toFixed(0)} mm<br>` +
     `tips forward when braking above ${brake.toFixed(2)} g · back when accelerating above ${accel.toFixed(2)} g · sideways in a turn above ${turn.toFixed(2)} g<br>` +
-    `shortest stop from ${vmax.toFixed(2)} m/s without tipping: ${stop.toFixed(0)} mm`;
+    `shortest stop from ${vmax.toFixed(2)} m/s without tipping: ${stop.toFixed(0)} mm<br>` +
+    `caster wheels touch the floor ${POLY[0][0].toFixed(0)} mm ahead and ${(-POLY[2][0]).toFixed(0)} mm behind the axle ` +
+    `(${Math.abs(CASTERS.front.theta) < 1.57 ? 'trailing after driving forward' : 'swung outward after reversing'})`;
   const chip = $('chip-tip');
   chip.className = brake < 0.2 ? 'chip bad' : brake < 0.35 ? 'chip warn' : 'chip';
   chip.lastChild.textContent = `Brake limit ${brake.toFixed(2)} g`;
@@ -1032,7 +1054,7 @@ function runSelfTest() {
     robot.updateMatrixWorld(true);
     checkContacts(); runLidar();
     updateStability();
-    out[k] = { contacts: [...new Set(lastHits.map(([a, b]) => `${a.userData.label} <> ${b ? b.userData.label : 'floor'}`))], lidarBlocked, brake: +lastStability.brake.toFixed(2), cog: lastStability.cog.map((v) => Math.round(v)), mass: Math.round(lastStability.M) };
+    out[k] = { contacts: [...new Set(lastHits.map(([a, b]) => `${a.userData.label} <> ${b ? b.userData.label : 'floor'}`))], lidarBlocked, brake: +lastStability.brake.toFixed(2), cog: lastStability.cog.map((v) => Math.round(v)), mass: Math.round(lastStability.M), front_contact: Math.round(POLY[0][0]) };
   }
   const crash = {
     sweep_inward: { L_j1: -1.5, L_j2: 0.9, L_j3: 0.9 },
@@ -1046,11 +1068,17 @@ function runSelfTest() {
     checkContacts();
     out['test_' + k] = { contacts: [...new Set(lastHits.map(([a, b]) => `${a.userData.label} <> ${b ? b.userData.label : 'floor'}`))] };
   }
+  setPose('reach'); $('payload').checked = true;
+  updateStability(); out.reach_loaded_trailing = { brake: +lastStability.brake.toFixed(2), front_contact: Math.round(POLY[0][0]), back_contact: Math.round(POLY[2][0]) };
+  held.add('down'); for (let i = 0; i < 80; i++) drive(0.05); held.clear();
+  updateStability(); out.reach_loaded_after_reverse = { brake: +lastStability.brake.toFixed(2), front_contact: Math.round(POLY[0][0]), back_contact: Math.round(POLY[2][0]), drove_m: +pose.x.toFixed(2) };
+  $('payload').checked = false; pose.x = pose.z = pose.yaw = 0; placeRig();
   setPose('rest'); checkContacts(); runLidar();
   const pre = document.createElement('pre');
   pre.id = 'selftest-result'; pre.hidden = true;
   pre.textContent = JSON.stringify({ meshes: { L: armMeshes.L.length, R: armMeshes.R.length, body: bodyMeshes.length }, poses: out });
   document.body.appendChild(pre);
+  setView('side'); camera.position.multiplyScalar(0.6); controls.target.y = 0.08; controls.update();
   document.title = 'SELFTEST DONE';
 }
 </script>
