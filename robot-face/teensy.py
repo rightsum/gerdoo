@@ -159,7 +159,7 @@ def servo_set(pan=None, tilt=None):
 
 # ---- Arms (STS3215 bus servos through the Teensy: L = IDs 1-8, R = 11-18) ----
 
-_ARM_COLS = re.compile(r"\b(pos|load|temp)=(-?\d+(?:,-?\d+)*)")
+_ARM_COLS = re.compile(r"\b(pos|load|temp|seam|min|max|mt)=(-?\d+(?:,-?\d+)*)")
 _ARM_STATE = re.compile(r"^ARM ([LR]) STATE ")
 
 
@@ -168,20 +168,28 @@ def parse_arm_state(line):
     "ARM L STATE torque=1 speed=400 pos=a,b,... load=... temp=..." -> dict.
 
     None for anything else. A joint that did not answer reads -1 in every column.
+    seam has a 1 for each joint the firmware's seam watchdog stopped since the
+    previous STATE (each trip is reported once).
     """
     m = _ARM_STATE.match(line or "")
     if not m:
         return None
     torque = re.search(r"\btorque=(\d)", line)
     speed = re.search(r"\bspeed=(\d+)", line)
+    strength = re.search(r"\bstrength=(\d+)", line)
     cols = {k: [int(x) for x in v.split(",")] for k, v in _ARM_COLS.findall(line)}
     return {
         "side": m.group(1),
         "torque": bool(torque and torque.group(1) == "1"),
         "speed": int(speed.group(1)) if speed else None,
+        "strength": int(strength.group(1)) if strength else None,   # torque limit, 0-1000
         "pos": cols.get("pos", []),
         "load": cols.get("load", []),
         "temp": cols.get("temp", []),
+        "seam": cols.get("seam", []),
+        "min": cols.get("min", []),      # joint limits, kept in the Teensy's EEPROM
+        "max": cols.get("max", []),
+        "mt": cols.get("mt", []),        # 1 = servo in multi-turn mode (log 028)
     }
 
 
@@ -206,6 +214,20 @@ def arm_torque(side, on):
 def arm_speed(side, steps_per_s):
     """Goal speed for that arm's later moves, in steps/s. The firmware clamps 50-3000."""
     return int(_arm(side, f"SPEED {int(steps_per_s)}", "SPEED ").split()[3])
+
+
+def arm_strength(side, limit):
+    """Torque limit (100-1000) for every joint of the arm, applied immediately."""
+    return int(_arm(side, f"STRENGTH {int(limit)}", "STRENGTH ").split()[3])
+
+
+def arm_calibrate(side, joint, mid, half_span):
+    """
+    Make the middle of a joint's hand-recorded range read 2048 and store its
+    limits in the servo. The reply contains " ok " only if the firmware saw
+    the reading move as expected; otherwise it restored the old values.
+    """
+    return _arm(side, f"CALIBRATE {int(joint)} {int(mid)} {int(half_span)}", "CALIBRATE ", timeout=3)
 
 
 def arm_move(side, joint, pos):
