@@ -48,6 +48,7 @@
 */
 
 #include "arm_types.h"
+#include <EEPROM.h>
 #include <micro_ros_arduino.h>
 
 #include <stdio.h>
@@ -695,25 +696,53 @@ void busSetId(int portNum, int from, int to) {
 // Arms — position control for the control panel
 // ---------------------------------------------------------------------------
 // Two ElRobot followers on one bus: L = IDs 1..8, R = IDs 11..18, base to
-// gripper. Commands are "ARM <L|R> STATE | TORQUE ON | TORQUE OFF |
-// SPEED <n> | MOVE <joint 1-8> <pos 0-4095>". Guard rails, all in place
-// before any torque:
-//   * MOVE is refused while that arm's torque is off.
-//   * TORQUE ON sets each joint's goal to its present position BEFORE
-//     enabling it, so switching on never makes a joint jump.
-//   * Torque limit 300/1000 — ElRobot's own value while it explores a joint's
-//     range — so a joint driven into a hard stop stalls instead of forcing it.
-//   * Speed starts at 400 steps/s (about 35 deg/s), acceleration 50. SPEED
-//     changes it (50-3000; the STS3215 tops out near 3000 steps/s, about
-//     270 deg/s, at 12 V).
+// gripper. Commands: "ARM <L|R> STATE | TORQUE ON | TORQUE OFF | SPEED <n> |
+// MOVE <joint 1-8> <pos 0-4095> | CALIBRATE <joint> <mid> <half> |
+// MULTITURN | RANGE <joint> <lo> <hi>".
+//
+// Two frames (log 028):
+//   * The servo's own position, signed. Each servo's encoder rolls over at a
+//     physical point that, on most of these joints, sits inside the joint's
+//     travel. In single-turn mode the servo can never drive through it and
+//     takes the long way round into its end stop instead. Multi-turn mode
+//     (Phase bit 4 on, servo angle limits 0/0) counts straight through it.
+//   * The display position: the servo's position mod 4096. After calibration
+//     each joint's travel is one contiguous stretch of it, centred on 2048.
+//     That is what the panel shows and sends.
+// A move is sent as "this far from where the servo is now":
+//   goal = present + (target - present display)
+// which takes the physical short path from any starting count, including after
+// a power cycle resets the servo's turn count.
+//
+// With the servos' own limits at 0/0, each joint's limits live here, in the
+// Teensy's EEPROM, one record per servo ID.
+//
+// Guard rails:
+//   * MOVE is refused while that arm's torque is off, for a joint not in
+//     multi-turn mode, outside the joint's limits, or (uncalibrated joint)
+//     more than half a turn away.
+//   * TORQUE ON writes each joint's present position as its goal before
+//     enabling it, and reads back that torque really came on.
+//   * Strength (the servos' torque limit) starts at 300/1000, ElRobot's value
+//     while exploring a joint's range, and is set per arm with STRENGTH
+//     (100-1000). 30% cannot hold the joints that carry the arm (log 028).
+//     Speed starts at 400 steps/s (about 35 deg/s).
+//   * A watchdog resets any holding joint whose goal is more than half a turn
+//     from where it is.
 // TORQUE OFF releases all eight joints of that arm: the panel's emergency stop.
 
 const uint8_t  ARM_PORT = 7, ARM_JOINTS = 8;
-const uint8_t  STS_REG_ACC = 41, STS_REG_TORQUE_LIMIT = 48;   // goal block starts at ACC
-const uint16_t ARM_TORQUE_LIMIT = 300;
+const uint8_t  STS_REG_ACC = 41, STS_REG_GOAL = 42, STS_REG_TORQUE_LIMIT = 48;   // goal block starts at ACC
+const uint8_t  STS_REG_MIN_LIMIT = 9;          // min u16, then max u16 at 11
+const uint8_t  STS_REG_PHASE = 18, STS_REG_OFFSET = 31, STS_REG_MODE = 33;
 const uint8_t  ARM_ACC = 50;
+const int      ARM_SEAM_LIMIT = 2048;          // half a turn
+const int      ARM_CAL_MARGIN = 30;            // steps (about 2.6 deg) kept clear of each recorded end stop
+const uint32_t ARM_WATCH_MS = 200;
+const int      RANGE_EEPROM_BASE = 256;        // 8 bytes per servo ID
+uint32_t armLastWatch = 0;
 
-Arm arms[2] = {{'L', 1, false, 400}, {'R', 11, false, 400}};
+Arm arms[2] = {{'L', 1, false, 400, 300, 0}, {'R', 11, false, 400, 300, 0}};
 
 Arm *armBySide(char c) {
   if (c == 'L') return &arms[0];
@@ -721,6 +750,45 @@ Arm *armBySide(char c) {
   return nullptr;
 }
 
+int mod4096(int v) { return ((v % 4096) + 4096) % 4096; }
+int decodeSigned15(uint16_t v) { return (v & 0x8000) ? -(int)(v & 0x7FFF) : (int)(v & 0x7FFF); }
+uint16_t encodeSigned15(int v) { return v < 0 ? (uint16_t)(0x8000 | (-v & 0x7FFF)) : (uint16_t)(v & 0x7FFF); }
+int decodeOffset(uint16_t v) { return (v & 0x800) ? -(int)(v & 0x7FF) : (int)(v & 0x7FF); }
+uint16_t encodeOffset(int o) { return (uint16_t)((o < 0 ? 0x800 : 0) | (abs(o) & 0x7FF)); }
+
+// --- joint limits, in the Teensy's EEPROM --------------------------------
+// Record per servo ID: magic 0xC7, lo u16, hi u16, checksum. Missing or
+// damaged records read as uncalibrated, 0..4095.
+void rangeLoad(uint8_t id, int16_t *lo, int16_t *hi) {
+  int addr = RANGE_EEPROM_BASE + id * 8;
+  uint8_t b[6];
+  for (int i = 0; i < 6; i++) b[i] = EEPROM.read(addr + i);
+  uint8_t sum = (b[0] + b[1] + b[2] + b[3] + b[4]) & 0xFF;
+  int l = b[1] | (b[2] << 8), h = b[3] | (b[4] << 8);
+  if (b[0] == 0xC7 && b[5] == sum && l >= 0 && h <= 4095 && l < h) {
+    *lo = l;
+    *hi = h;
+  } else {
+    *lo = 0;
+    *hi = 4095;
+  }
+}
+
+void rangeSave(uint8_t id, int lo, int hi) {
+  int addr = RANGE_EEPROM_BASE + id * 8;
+  uint8_t b[6] = {0xC7, (uint8_t)(lo & 0xFF), (uint8_t)(lo >> 8), (uint8_t)(hi & 0xFF), (uint8_t)(hi >> 8), 0};
+  b[5] = (b[0] + b[1] + b[2] + b[3] + b[4]) & 0xFF;
+  for (int i = 0; i < 6; i++) EEPROM.update(addr + i, b[i]);
+}
+
+void armLoadRanges() {
+  for (Arm &a : arms)
+    for (uint8_t j = 0; j < ARM_JOINTS; j++) rangeLoad(a.firstId + j, &a.lo[j], &a.hi[j]);
+}
+
+bool armCalibrated(const Arm &a, uint8_t j) { return !(a.lo[j] == 0 && a.hi[j] == 4095); }
+
+// --- bus helpers -----------------------------------------------------------
 HardwareSerial *armBus() {
   HardwareSerial *s = busPort(ARM_PORT);
   if (!busOpened[ARM_PORT]) {
@@ -736,57 +804,111 @@ bool busWrite(HardwareSerial &s, uint8_t id, const uint8_t *params, uint8_t np) 
   return busTransact(s, id, STS_WRITE, params, np, out, 2, &err, &garbled) >= 0;
 }
 
-int armReadPos(HardwareSerial &s, uint8_t id) {
-  const uint8_t q[2] = {STS_REG_PRESENT, 2};
-  uint8_t out[2], err;
+bool busReadBytes(HardwareSerial &s, uint8_t id, uint8_t addr, uint8_t n, uint8_t *out) {
+  const uint8_t q[2] = {addr, n};
+  uint8_t err;
   bool garbled;
-  if (busTransact(s, id, STS_READ, q, 2, out, 2, &err, &garbled) != 2) return -1;
-  return out[0] | (out[1] << 8);
+  return busTransact(s, id, STS_READ, q, 2, out, n, &err, &garbled) == n;
 }
 
-// Acceleration, goal position, goal time 0, goal speed — one write, as the
+// The servo's own position, signed: in multi-turn mode it counts past 4095
+// and below 0. In single-turn mode it is 0..4095 and this reads the same.
+bool readPos(HardwareSerial &s, uint8_t id, int *pos) {
+  uint8_t out[2];
+  if (!busReadBytes(s, id, STS_REG_PRESENT, 2, out)) return false;
+  *pos = decodeSigned15(out[0] | (out[1] << 8));
+  return true;
+}
+
+bool isMultiturn(HardwareSerial &s, uint8_t id) {
+  uint8_t ph[1], lim[4];
+  return busReadBytes(s, id, STS_REG_PHASE, 1, ph) && busReadBytes(s, id, STS_REG_MIN_LIMIT, 4, lim) &&
+         (ph[0] & 0x10) && !lim[0] && !lim[1] && !lim[2] && !lim[3];
+}
+
+// Acceleration, goal (signed), goal time 0, goal speed — one write, as the
 // Feetech SDK's WritePosEx does it.
-bool armWriteGoal(HardwareSerial &s, uint8_t id, int pos, uint16_t speed) {
-  pos = constrain(pos, 0, 4095);
-  const uint8_t p[8] = {STS_REG_ACC, ARM_ACC, (uint8_t)(pos & 0xFF), (uint8_t)(pos >> 8),
+bool armWriteGoal(HardwareSerial &s, uint8_t id, int goal, uint16_t speed) {
+  uint16_t g = encodeSigned15(constrain(goal, -30719, 30719));
+  const uint8_t p[8] = {STS_REG_ACC, ARM_ACC, (uint8_t)(g & 0xFF), (uint8_t)(g >> 8),
                         0, 0, (uint8_t)(speed & 0xFF), (uint8_t)(speed >> 8)};
   return busWrite(s, id, p, 8);
 }
 
+// A write's status reply only says the packet arrived. Torque is read back:
+// the first multi-turn test showed a torque write can simply not happen.
 bool armSetTorque(HardwareSerial &s, uint8_t id, bool on) {
   const uint8_t p[2] = {STS_REG_TORQUE_ENABLE, (uint8_t)(on ? 1 : 0)};
-  return busWrite(s, id, p, 2);
+  for (int attempt = 0; attempt < 3; attempt++) {
+    busWrite(s, id, p, 2);
+    uint8_t te[1];
+    if (busReadBytes(s, id, STS_REG_TORQUE_ENABLE, 1, te) && te[0] == (on ? 1 : 0)) return true;
+    delay(5);
+  }
+  return false;
 }
 
+// Offset, Phase and angle limits go to the servo's EEPROM. Each write is
+// spaced out and the registers are read back; up to three attempts. limits
+// 0/0 together with Phase bit 4 is multi-turn mode.
+bool servoWriteConfig(HardwareSerial &s, uint8_t id, int ofs, uint8_t phase, int lo, int hi) {
+  uint16_t v = encodeOffset(ofs);
+  const uint8_t unlock[2] = {STS_REG_LOCK, 0};
+  const uint8_t wofs[3] = {STS_REG_OFFSET, (uint8_t)(v & 0xFF), (uint8_t)(v >> 8)};
+  const uint8_t wph[2] = {STS_REG_PHASE, phase};
+  const uint8_t wlim[5] = {STS_REG_MIN_LIMIT, (uint8_t)(lo & 0xFF), (uint8_t)(lo >> 8),
+                           (uint8_t)(hi & 0xFF), (uint8_t)(hi >> 8)};
+  const uint8_t lock[2] = {STS_REG_LOCK, 1};
+  for (int attempt = 0; attempt < 3; attempt++) {
+    busWrite(s, id, unlock, 2);  delay(15);
+    busWrite(s, id, wofs, 3);    delay(15);
+    busWrite(s, id, wph, 2);     delay(15);
+    busWrite(s, id, wlim, 5);    delay(15);
+    busWrite(s, id, lock, 2);    delay(15);
+    uint8_t o[2], ph[1], l[4];
+    if (busReadBytes(s, id, STS_REG_OFFSET, 2, o) && busReadBytes(s, id, STS_REG_PHASE, 1, ph) &&
+        busReadBytes(s, id, STS_REG_MIN_LIMIT, 4, l) &&
+        (uint16_t)(o[0] | (o[1] << 8)) == v && ph[0] == phase &&
+        (l[0] | (l[1] << 8)) == lo && (l[2] | (l[3] << 8)) == hi)
+      return true;
+  }
+  return false;
+}
+
+// --- commands ----------------------------------------------------------------
 void armState(Arm &a) {
   HardwareSerial &s = *armBus();
-  int pos[ARM_JOINTS], load[ARM_JOINTS], temp[ARM_JOINTS];
+  int pos[ARM_JOINTS], load[ARM_JOINTS], temp[ARM_JOINTS], seam[ARM_JOINTS];
+  int lmin[ARM_JOINTS], lmax[ARM_JOINTS], mt[ARM_JOINTS];
   uint8_t torqued = 0;
   for (uint8_t j = 0; j < ARM_JOINTS; j++) {
+    uint8_t id = a.firstId + j;
     // Torque as the servos report it, not as this firmware remembers it: a
     // reboot or reflash forgets, while the servos keep holding.
-    const uint8_t qt[2] = {STS_REG_TORQUE_ENABLE, 1};
-    uint8_t te[1] = {0}, terr;
-    bool tg;
-    if (busTransact(s, a.firstId + j, STS_READ, qt, 2, te, 1, &terr, &tg) == 1 && te[0]) torqued++;
-    const uint8_t q[2] = {STS_REG_PRESENT, 8};
-    uint8_t out[8], err;
-    bool garbled;
-    if (busTransact(s, a.firstId + j, STS_READ, q, 2, out, 8, &err, &garbled) == 8) {
-      pos[j] = out[0] | (out[1] << 8);
+    uint8_t te[1];
+    if (busReadBytes(s, id, STS_REG_TORQUE_ENABLE, 1, te) && te[0]) torqued++;
+    uint8_t out[8];
+    if (busReadBytes(s, id, STS_REG_PRESENT, 8, out)) {
+      pos[j] = mod4096(decodeSigned15(out[0] | (out[1] << 8)));
       load[j] = ((out[4] | (out[5] << 8)) & 0x3FF) / 10;   // magnitude, percent
       temp[j] = out[7];
+      mt[j] = isMultiturn(s, id) ? 1 : 0;
     } else {
-      pos[j] = load[j] = temp[j] = -1;
+      pos[j] = load[j] = temp[j] = mt[j] = -1;
     }
+    seam[j] = (a.seamTrips >> j) & 1;
+    lmin[j] = a.lo[j];
+    lmax[j] = a.hi[j];
   }
+  a.seamTrips = 0;                    // reported once
   a.torque = torqued == ARM_JOINTS;
   Serial.print("ARM ");  Serial.print(a.side);
   Serial.print(" STATE torque=");  Serial.print(a.torque ? 1 : 0);
   Serial.print(" speed=");         Serial.print(a.speed);
-  const char *names[3] = {" pos=", " load=", " temp="};
-  int *cols[3] = {pos, load, temp};
-  for (uint8_t c = 0; c < 3; c++) {
+  Serial.print(" strength=");      Serial.print(a.strength);
+  const char *names[7] = {" pos=", " load=", " temp=", " seam=", " min=", " max=", " mt="};
+  int *cols[7] = {pos, load, temp, seam, lmin, lmax, mt};
+  for (uint8_t c = 0; c < 7; c++) {
     Serial.print(names[c]);
     for (uint8_t j = 0; j < ARM_JOINTS; j++) {
       if (j) Serial.print(",");
@@ -809,38 +931,337 @@ void armTorqueCmd(Arm &a, bool on) {
   // Every joint must answer before any of them gets torque.
   int pos[ARM_JOINTS];
   for (uint8_t j = 0; j < ARM_JOINTS; j++) {
-    pos[j] = armReadPos(s, a.firstId + j);
-    if (pos[j] < 0) {
-      Serial.print(" TORQUE refused: id=");  Serial.print(a.firstId + j);
+    if (!readPos(s, a.firstId + j, &pos[j])) {
+      Serial.print(" TORQUE refused: J");  Serial.print(j + 1);
       Serial.println(" did not answer");
       return;
     }
   }
-  const uint8_t lim[3] = {STS_REG_TORQUE_LIMIT, (uint8_t)(ARM_TORQUE_LIMIT & 0xFF),
-                          (uint8_t)(ARM_TORQUE_LIMIT >> 8)};
+  const uint8_t lim[3] = {STS_REG_TORQUE_LIMIT, (uint8_t)(a.strength & 0xFF),
+                          (uint8_t)(a.strength >> 8)};
   uint8_t ok = 0;
+  String failed;
   for (uint8_t j = 0; j < ARM_JOINTS; j++) {
     uint8_t id = a.firstId + j;
-    if (busWrite(s, id, lim, 3) && armWriteGoal(s, id, pos[j], a.speed) && armSetTorque(s, id, true)) ok++;
+    busWrite(s, id, lim, 3);
+    if (armWriteGoal(s, id, pos[j], a.speed) && armSetTorque(s, id, true)) ok++;
+    else failed += " J" + String(j + 1);
   }
-  a.torque = true;
-  Serial.print(" TORQUE on ok=");  Serial.println(ok);
+  a.torque = ok == ARM_JOINTS;
+  Serial.print(" TORQUE on ok=");  Serial.print(ok);
+  if (failed.length()) { Serial.print(" failed:");  Serial.print(failed); }
+  Serial.println();
 }
 
-void armMove(Arm &a, int joint, int pos) {
+// Torque limit for every joint of the arm, applied at once (the register is in
+// RAM, so this wears nothing) and used by every later TORQUE ON.
+void armStrength(Arm &a, int value) {
+  a.strength = constrain(value, 100, 1000);
+  HardwareSerial &s = *armBus();
+  const uint8_t lim[3] = {STS_REG_TORQUE_LIMIT, (uint8_t)(a.strength & 0xFF), (uint8_t)(a.strength >> 8)};
+  uint8_t ok = 0;
+  for (uint8_t j = 0; j < ARM_JOINTS; j++) ok += busWrite(s, a.firstId + j, lim, 3);
+  Serial.print("ARM ");          Serial.print(a.side);
+  Serial.print(" STRENGTH ");    Serial.print(a.strength);
+  Serial.print(" applied=");     Serial.println(ok);
+}
+
+void armMove(Arm &a, int joint, int target) {
   Serial.print("ARM ");  Serial.print(a.side);
+  if (joint < 1 || joint > ARM_JOINTS || target < 0 || target > 4095) {
+    Serial.println(" MOVE refused: usage MOVE <joint 1-8> <pos 0-4095>");
+    return;
+  }
+  HardwareSerial &s = *armBus();
+  uint8_t j = joint - 1, id = a.firstId + j;
+  int now;
+  if (!readPos(s, id, &now)) {
+    Serial.print(" MOVE refused: J");  Serial.print(joint);  Serial.println(" did not answer");
+    return;
+  }
+  int nowD = mod4096(now);
+  if (!isMultiturn(s, id)) {
+    Serial.print(" MOVE refused: J");  Serial.print(joint);
+    Serial.println(" is not in multi-turn mode; run ARM MULTITURN");
+    return;
+  }
+  if (armCalibrated(a, j)) {
+    if (target < a.lo[j] || target > a.hi[j]) {
+      Serial.print(" MOVE refused: J");  Serial.print(joint);
+      Serial.print(" range is ");        Serial.print(a.lo[j]);
+      Serial.print("..");                Serial.println(a.hi[j]);
+      return;
+    }
+  } else if (abs(target - nowD) > ARM_SEAM_LIMIT) {
+    Serial.print(" MOVE refused: J");     Serial.print(joint);
+    Serial.print(" is at ");               Serial.print(nowD);
+    Serial.print(", and ");                Serial.print(target);
+    Serial.println(" is more than half a turn away. Calibrate the arm, or move in two steps");
+    return;
+  }
   if (!a.torque) {
     Serial.println(" MOVE refused: torque is off");
     return;
   }
-  if (joint < 1 || joint > ARM_JOINTS || pos < 0 || pos > 4095) {
-    Serial.println(" MOVE refused: usage MOVE <joint 1-8> <pos 0-4095>");
+  bool ok = armWriteGoal(s, id, now + (target - nowD), a.speed);
+  Serial.print(" MOVE joint=");  Serial.print(joint);
+  Serial.print(" goal=");        Serial.print(target);
+  Serial.println(ok ? " ok" : " failed");
+}
+
+// Calibrate one joint from a range recorded by hand on the panel. `mid` is the
+// middle of the recorded range and `half` half its span, in display readings.
+// Afterwards the middle reads 2048, the limits 2048 +/- (half - margin) are
+// stored in the Teensy, and the servo is in multi-turn mode. The display
+// reading must move by exactly the offset change; otherwise everything goes
+// back.
+void armCalibrate(Arm &a, int joint, int mid, int half) {
+  Serial.print("ARM ");  Serial.print(a.side);
+  if (joint < 1 || joint > ARM_JOINTS || mid < 0 || mid > 4095 || half < 100 || half > 2047) {
+    Serial.println(" CALIBRATE refused: usage CALIBRATE <joint 1-8> <mid 0-4095> <half 100-2047>");
     return;
   }
-  bool ok = armWriteGoal(*armBus(), a.firstId + joint - 1, pos, a.speed);
-  Serial.print(" MOVE joint=");  Serial.print(joint);
-  Serial.print(" goal=");        Serial.print(pos);
+  HardwareSerial &s = *armBus();
+  uint8_t j = joint - 1, id = a.firstId + j;
+  uint8_t te[1], o[2], ph[1], l[4];
+  int now;
+  if (!busReadBytes(s, id, STS_REG_TORQUE_ENABLE, 1, te) || te[0] != 0) {
+    Serial.print(" CALIBRATE refused: J");  Serial.print(joint);
+    Serial.println(" must be answering with torque off");
+    return;
+  }
+  if (!busReadBytes(s, id, STS_REG_OFFSET, 2, o) || !busReadBytes(s, id, STS_REG_PHASE, 1, ph) ||
+      !busReadBytes(s, id, STS_REG_MIN_LIMIT, 4, l) || !readPos(s, id, &now)) {
+    Serial.println(" CALIBRATE refused: could not read the joint's current calibration");
+    return;
+  }
+  int oldOfs = decodeOffset(o[0] | (o[1] << 8));
+  uint8_t oldPhase = ph[0];
+  int oldLo = l[0] | (l[1] << 8), oldHi = l[2] | (l[3] << 8);
+  int16_t oldRangeLo = a.lo[j], oldRangeHi = a.hi[j];
+
+  int newOfs = oldOfs + (mid - 2048);
+  while (newOfs > 2047) newOfs -= 4096;
+  while (newOfs < -2047) newOfs += 4096;
+  int lo = max(0, 2048 - half + ARM_CAL_MARGIN);
+  int hi = min(4095, 2048 + half - ARM_CAL_MARGIN);
+
+  if (!servoWriteConfig(s, id, newOfs, oldPhase | 0x10, 0, 0)) {
+    bool restored = servoWriteConfig(s, id, oldOfs, oldPhase, oldLo, oldHi);
+    Serial.print(" CALIBRATE FAILED J");  Serial.print(joint);
+    Serial.print(": the servo did not keep the new settings; old ones ");
+    Serial.println(restored ? "restored" : "NOT confirmed restored");
+    return;
+  }
+  int expected = mod4096(mod4096(now) - (newOfs - oldOfs));
+  int after = -1;
+  bool landed = false;
+  for (int t = 0; t < 25 && !landed; t++) {      // the servo applies an offset with a delay
+    delay(20);
+    if (!readPos(s, id, &after)) continue;
+    int diff = mod4096(mod4096(after) - expected);
+    landed = diff <= 15 || diff >= 4096 - 15;     // the arm may shift a hair while held
+  }
+  if (!landed) {
+    bool restored = servoWriteConfig(s, id, oldOfs, oldPhase, oldLo, oldHi);
+    Serial.print(" CALIBRATE FAILED J");  Serial.print(joint);
+    Serial.print(": reading went ");      Serial.print(mod4096(now));
+    Serial.print(" -> ");                 Serial.print(mod4096(after));
+    Serial.print(", expected ");          Serial.print(expected);
+    Serial.print("; old settings ");
+    Serial.println(restored ? "restored" : "NOT confirmed restored");
+    a.lo[j] = oldRangeLo;
+    a.hi[j] = oldRangeHi;
+    return;
+  }
+  rangeSave(id, lo, hi);
+  a.lo[j] = lo;
+  a.hi[j] = hi;
+  Serial.print(" CALIBRATE joint=");  Serial.print(joint);
+  Serial.print(" ok offset=");        Serial.print(oldOfs);
+  Serial.print("->");                 Serial.print(newOfs);
+  Serial.print(" limits=");           Serial.print(lo);
+  Serial.print("..");                 Serial.print(hi);
+  Serial.print(" reading=");          Serial.print(mod4096(now));
+  Serial.print("->");                 Serial.println(mod4096(after));
+}
+
+// Switch every joint of an arm to multi-turn mode, keeping its offset. A
+// joint calibrated the old way has its limits in the servo; those move to the
+// Teensy's EEPROM first, then the servo's limits go to 0/0. Joints must be
+// limp. Joints already in multi-turn mode are left alone.
+void armMultiturn(Arm &a) {
+  HardwareSerial &s = *armBus();
+  uint8_t done = 0;
+  for (uint8_t j = 0; j < ARM_JOINTS; j++) {
+    uint8_t id = a.firstId + j;
+    Serial.print("ARM ");  Serial.print(a.side);
+    Serial.print(" MULTITURN J");  Serial.print(j + 1);
+    uint8_t te[1], o[2], ph[1], l[4];
+    if (!busReadBytes(s, id, STS_REG_TORQUE_ENABLE, 1, te) || !busReadBytes(s, id, STS_REG_OFFSET, 2, o) ||
+        !busReadBytes(s, id, STS_REG_PHASE, 1, ph) || !busReadBytes(s, id, STS_REG_MIN_LIMIT, 4, l)) {
+      Serial.println(" skipped: no reply");
+      continue;
+    }
+    if (te[0]) {
+      Serial.println(" skipped: torque is on");
+      continue;
+    }
+    int ofs = decodeOffset(o[0] | (o[1] << 8));
+    int lo = l[0] | (l[1] << 8), hi = l[2] | (l[3] << 8);
+    if ((ph[0] & 0x10) && lo == 0 && hi == 0) {
+      Serial.println(" already multi-turn");
+      done++;
+      continue;
+    }
+    if (!(lo == 0 && hi == 4095) && lo < hi) {    // calibrated the old way: keep its range
+      rangeSave(id, lo, hi);
+      a.lo[j] = lo;
+      a.hi[j] = hi;
+    }
+    if (servoWriteConfig(s, id, ofs, ph[0] | 0x10, 0, 0)) {
+      done++;
+      Serial.print(" ok range=");  Serial.print(a.lo[j]);
+      Serial.print("..");          Serial.println(a.hi[j]);
+    } else {
+      bool restored = servoWriteConfig(s, id, ofs, ph[0], lo, hi);
+      Serial.print(" FAILED; old settings ");
+      Serial.println(restored ? "restored" : "NOT confirmed restored");
+    }
+  }
+  Serial.print("ARM ");  Serial.print(a.side);
+  Serial.print(" MULTITURN done ok=");  Serial.println(done);
+}
+
+void armRange(Arm &a, int joint, int lo, int hi) {
+  Serial.print("ARM ");  Serial.print(a.side);
+  if (joint < 1 || joint > ARM_JOINTS || lo < 0 || hi > 4095 || hi - lo < 100) {
+    Serial.println(" RANGE refused: usage RANGE <joint 1-8> <lo> <hi>, 0..4095, at least 100 apart");
+    return;
+  }
+  rangeSave(a.firstId + joint - 1, lo, hi);
+  a.lo[joint - 1] = lo;
+  a.hi[joint - 1] = hi;
+  Serial.print(" RANGE joint=");  Serial.print(joint);
+  Serial.print(" ");              Serial.print(lo);
+  Serial.print("..");             Serial.print(hi);
+  Serial.println(" ok");
+}
+
+void armWatchdog() {
+  if (millis() - armLastWatch < ARM_WATCH_MS) return;
+  armLastWatch = millis();
+  for (Arm &a : arms) {
+    if (!a.torque) continue;
+    HardwareSerial &s = *armBus();
+    for (uint8_t j = 0; j < ARM_JOINTS; j++) {
+      uint8_t id = a.firstId + j;
+      uint8_t g[2];
+      int now;
+      if (!busReadBytes(s, id, STS_REG_GOAL, 2, g) || !readPos(s, id, &now)) continue;
+      int goal = decodeSigned15(g[0] | (g[1] << 8));
+      if (abs(goal - now) <= ARM_SEAM_LIMIT) continue;
+      armWriteGoal(s, id, now, a.speed);
+      a.seamTrips |= 1 << j;
+      Serial.print("ARM ");          Serial.print(a.side);
+      Serial.print(" SEAM joint=");  Serial.print(j + 1);
+      Serial.print(" present=");     Serial.print(now);
+      Serial.print(" goal=");        Serial.print(goal);
+      Serial.println(" -> now holding at present");
+    }
+  }
+}
+
+// --- diagnostics (log 028's multi-turn experiment) ----------------------------
+// BUS POS reads one servo's position as signed. BUS WRITE changes configuration
+// registers only, and only with that servo's torque off, so it cannot move
+// anything. JOINT TEST moves one multi-turn joint by a small delta at 25%
+// torque, prints where it goes, and switches torque off by itself.
+
+bool isConfigRegister(int addr) {
+  return (addr >= STS_REG_MIN_LIMIT && addr <= STS_REG_MIN_LIMIT + 3) ||
+         addr == STS_REG_PHASE || addr == STS_REG_MODE || addr == STS_REG_LOCK;
+}
+
+void busPos(int id) {
+  uint8_t out[2];
+  if (id < 0 || id > 252 || !busReadBytes(*armBus(), id, STS_REG_PRESENT, 2, out)) {
+    Serial.println("BUS POS no reply");
+    return;
+  }
+  uint16_t raw = out[0] | (out[1] << 8);
+  Serial.print("BUS POS id=");  Serial.print(id);
+  Serial.print(" raw=0x");      Serial.print(raw, HEX);
+  Serial.print(" signed=");     Serial.print(decodeSigned15(raw));
+  Serial.print(" mod4096=");    Serial.println(mod4096(decodeSigned15(raw)));
+}
+
+void busWriteConfig(int id, int addr, const int *vals, int n) {
+  HardwareSerial &s = *armBus();
+  bool okRange = n >= 1 && addr >= 0 && addr + n - 1 <= 255;
+  for (int i = 0; okRange && i < n; i++) okRange = isConfigRegister(addr + i) && vals[i] >= 0 && vals[i] <= 255;
+  if (id < 0 || id > 252 || !okRange) {
+    Serial.println("BUS WRITE refused: config registers only (9-12, 18, 33, 55), bytes 0-255");
+    return;
+  }
+  uint8_t te[1];
+  if (!busReadBytes(s, id, STS_REG_TORQUE_ENABLE, 1, te) || te[0] != 0) {
+    Serial.println("BUS WRITE refused: the servo must answer with torque off");
+    return;
+  }
+  uint8_t p[6];
+  p[0] = addr;
+  for (int i = 0; i < n; i++) p[1 + i] = vals[i];
+  bool ok = busWrite(s, id, p, 1 + n);
+  delay(15);
+  Serial.print("BUS WRITE id=");  Serial.print(id);
+  Serial.print(" addr=");         Serial.print(addr);
   Serial.println(ok ? " ok" : " failed");
+}
+
+void jointTest(int id, int delta) {
+  HardwareSerial &s = *armBus();
+  if (id < 0 || id > 252 || delta == 0 || abs(delta) > 400) {
+    Serial.println("TEST refused: usage JOINT TEST <id> <delta, |delta| 1-400>");
+    return;
+  }
+  if (!isMultiturn(s, id)) {
+    Serial.println("TEST refused: not in multi-turn mode (Phase bit 4 and limits 0/0)");
+    return;
+  }
+  int p0;
+  if (!readPos(s, id, &p0)) {
+    Serial.println("TEST refused: no position reply");
+    return;
+  }
+  int goal = constrain(p0 + delta, -30719, 30719);
+  const uint8_t tlim[3] = {STS_REG_TORQUE_LIMIT, 250, 0};            // 25 %
+  busWrite(s, id, tlim, 3);
+  armWriteGoal(s, id, goal, 300);       // goal first, then torque: no stale-goal jump
+  bool on = armSetTorque(s, id, true);
+  Serial.print("TEST id=");  Serial.print(id);
+  Serial.print(" start=");   Serial.print(p0);
+  Serial.print(" goal=");    Serial.print(goal);
+  Serial.print(" torque=");  Serial.println(on ? 1 : 0);
+  int last = p0;
+  for (int t = 1; t <= 25; t++) {
+    delay(100);
+    uint8_t out[11];                    // position .. moving flag (66)
+    if (!busReadBytes(s, id, STS_REG_PRESENT, 11, out)) continue;
+    last = decodeSigned15(out[0] | (out[1] << 8));
+    Serial.print("TEST t=");    Serial.print(t * 100);
+    Serial.print("ms pos=");    Serial.print(last);
+    Serial.print(" load=");     Serial.print(((out[4] | (out[5] << 8)) & 0x3FF) / 10);
+    Serial.print("% status=");  Serial.print(out[9]);
+    Serial.print(" moving=");   Serial.println(out[10]);
+  }
+  armSetTorque(s, id, false);
+  Serial.print("TEST done id=");  Serial.print(id);
+  Serial.print(" start=");        Serial.print(p0);
+  Serial.print(" goal=");         Serial.print(goal);
+  Serial.print(" final=");        Serial.print(last);
+  Serial.print(abs(last - goal) <= 20 ? " REACHED" : " NOT reached");
+  Serial.println(" (torque off)");
 }
 
 void armCommand(Arm &a, const char *rest) {
@@ -850,10 +1271,22 @@ void armCommand(Arm &a, const char *rest) {
     armTorqueCmd(a, true);
   } else if (strcmp(rest, "TORQUE OFF") == 0) {
     armTorqueCmd(a, false);
+  } else if (strcmp(rest, "MULTITURN") == 0) {
+    armMultiturn(a);
   } else if (strncmp(rest, "SPEED ", 6) == 0) {
     a.speed = constrain(atoi(rest + 6), 50, 3000);
     Serial.print("ARM ");  Serial.print(a.side);
     Serial.print(" SPEED ");  Serial.println(a.speed);
+  } else if (strncmp(rest, "STRENGTH ", 9) == 0) {
+    armStrength(a, atoi(rest + 9));
+  } else if (strncmp(rest, "CALIBRATE ", 10) == 0) {
+    int joint = -1, mid = -1, half = -1;
+    sscanf(rest + 10, "%d %d %d", &joint, &mid, &half);
+    armCalibrate(a, joint, mid, half);
+  } else if (strncmp(rest, "RANGE ", 6) == 0) {
+    int joint = -1, lo = -1, hi = -1;
+    sscanf(rest + 6, "%d %d %d", &joint, &lo, &hi);
+    armRange(a, joint, lo, hi);
   } else if (strncmp(rest, "MOVE ", 5) == 0) {
     int joint = -1, pos = -1;
     sscanf(rest + 5, "%d %d", &joint, &pos);
@@ -929,6 +1362,20 @@ void handleCommand(char *cmd) {
     busReadRaw(7, id, addr, len);
   } else if (strncmp(cmd, "ARM ", 4) == 0 && armBySide(cmd[4]) && cmd[5] == ' ') {
     armCommand(*armBySide(cmd[4]), cmd + 6);
+  } else if (strncmp(cmd, "BUS POS ", 8) == 0) {
+    busPos(atoi(cmd + 8));
+  } else if (strncmp(cmd, "BUS WRITE ", 10) == 0) {
+    int id = -1, addr = -1, vals[5], n = 0, used = 0;
+    const char *p = cmd + 10;
+    if (sscanf(p, "%d %d%n", &id, &addr, &used) == 2) {
+      p += used;
+      while (n < 5 && sscanf(p, "%d%n", &vals[n], &used) == 1) { p += used; n++; }
+    }
+    busWriteConfig(id, addr, vals, n);
+  } else if (strncmp(cmd, "JOINT TEST ", 11) == 0) {
+    int id = -1, delta = 0;
+    sscanf(cmd + 11, "%d %d", &id, &delta);
+    jointTest(id, delta);
   } else if (strncmp(cmd, "BUS SETID ", 10) == 0) {
     int from = -1, to = -1;
     sscanf(cmd + 10, "%d %d", &from, &to);
@@ -959,6 +1406,7 @@ void pollConsole() {
 void setup() {
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, LOW);
+  armLoadRanges();                      // joint limits, kept in EEPROM (log 028)
 
   Serial.begin(115200);
   // No `while (!Serial)`. Headless robot: blocking on a host that may never
@@ -1001,6 +1449,7 @@ void setup() {
 
 void loop() {
   loopCount++;
+  armWatchdog();
 
   // --- Smooth servo motion: time-based, speed-limited, 50 Hz ---
   uint32_t nowMs = millis();

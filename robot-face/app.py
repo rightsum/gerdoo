@@ -979,6 +979,47 @@ def api_arm_speed(name):
     return jsonify(ok=True, speed=speed)
 
 
+@app.route("/api/arm/<name>/strength", methods=["POST"])
+def api_arm_strength(name):
+    """How hard the arm may push, as a percentage of the servos' full torque."""
+    side, refusal = _arm_side(name)
+    if refusal:
+        return refusal
+    data = request.get_json(silent=True) or {}
+    try:
+        percent = int(data["percent"])
+    except (KeyError, TypeError, ValueError):
+        return jsonify(error="body must be {\"percent\": 10-100}"), 400
+    if not 10 <= percent <= 100:
+        return jsonify(error="percent must be 10-100"), 400
+    try:
+        limit = teensy.arm_strength(side, percent * 10)
+    except teensy.TeensyError as e:
+        return jsonify(error=str(e)), 503
+    return jsonify(ok=True, percent=limit // 10)
+
+
+@app.route("/api/arm/<name>/calibrate", methods=["POST"])
+def api_arm_calibrate(name):
+    side, refusal = _arm_side(name)
+    if refusal:
+        return refusal
+    data = request.get_json(silent=True) or {}
+    try:
+        joint, mid, half = int(data["joint"]), int(data["mid"]), int(data["half_span"])
+    except (KeyError, TypeError, ValueError):
+        return jsonify(error="body must be {\"joint\": 1-8, \"mid\": 0-4095, \"half_span\": 100-2047}"), 400
+    if not (1 <= joint <= 8 and 0 <= mid <= 4095 and 100 <= half <= 2047):
+        return jsonify(error="joint 1-8, mid 0-4095, half_span 100-2047"), 400
+    try:
+        line = teensy.arm_calibrate(side, joint, mid, half)
+    except teensy.TeensyError as e:
+        return jsonify(error=str(e)), 503
+    if " ok " not in line:
+        return jsonify(error=line), 409
+    return jsonify(ok=True, reply=line)
+
+
 @app.route("/api/arm/<name>/move", methods=["POST"])
 def api_arm_move(name):
     side, refusal = _arm_side(name)

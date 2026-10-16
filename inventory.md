@@ -891,11 +891,14 @@ Two [ElRobot](https://github.com/norma-core/norma-core/tree/main/hardware/elrobo
 **As built (log 028):**
 - **One adapter for both arms,** in UART mode (jumper A), driven by the Teensy's `Serial7` (pins 28/29).
 - **IDs: left 1–8, right 11–18,** base to gripper. Both arms share one bus, so their IDs must not overlap.
+- **All 16 servos run in multi-turn mode** (Phase bit 4 on, servo angle limits 0/0). Most joints' encoder rollover sits *inside* their travel, because the servos weren't centred before mounting. In single-turn mode the servo cannot drive through it (log 028).
+- **Joint limits live in the Teensy's EEPROM,** one record per servo ID.
 - **Firmware console commands:**
   - `BUS SCAN`: read-only
-  - `BUS SETID`: the only write, ID register only
-  - `ARM <L|R> STATE / TORQUE ON|OFF / SPEED / MOVE`
-- **The control panel has a card per arm.**
+  - `BUS SETID`: ID register only
+  - `ARM <L|R> STATE / TORQUE ON|OFF / SPEED / STRENGTH / MOVE / CALIBRATE / MULTITURN / RANGE`
+- **The control panel has a card per arm:** camera, torque, speed, strength, calibration and 8 joint sliders.
+- **Fitting a new or replacement servo:** centre it (reading 2048) *before* attaching the horn, so its rollover lands outside the joint's travel.
 
 The diagram below is ElRobot's USB variant, one adapter per arm, kept for reference.
 

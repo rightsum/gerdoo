@@ -272,10 +272,23 @@
           <button class="go arm-enable">Enable torque</button>
           <button class="stop arm-release">Release</button>
         </div>
+        <div class="armbtns">
+          <button class="arm-cal">Calibrate…</button>
+          <button class="go arm-cal-save" hidden>Save calibration</button>
+          <button class="arm-cal-cancel" hidden>Cancel</button>
+        </div>
+        <p class="hint arm-cal-hint" hidden>Recording. Move <b>every</b> joint slowly
+        by hand from one end stop to the other. Each row shows the span measured so
+        far against ElRobot's spec; ✓ means they match. Then press Save.</p>
         <div class="joint">
           <b>Speed</b>
           <input type="range" class="arm-speed" min="50" max="3000" step="50" value="400">
           <span class="val arm-speed-val">35°/s</span>
+        </div>
+        <div class="joint">
+          <b>Strength</b>
+          <input type="range" class="arm-strength" min="10" max="100" step="5" value="30">
+          <span class="val arm-strength-val">30%</span>
         </div>
         {% for name in ["J1 base", "J2", "J3", "J4", "J5", "J6", "J7", "J8 gripper"] %}
         <div class="joint arm-joint">
@@ -286,9 +299,12 @@
         {% endfor %}
         <p class="hint">Sliders follow the arm while torque is off. Turn a joint by
         hand to see which slider is which. Enable holds every joint where it is,
-        then the sliders move them at 30% torque. 0–4095 is one full turn and 0 and
-        4095 are the same spot, so a joint sitting near either end wraps around.
-        Keep those joints in the middle of their slider until calibrated.
+        then the sliders move them. Strength caps how hard they may push (30% to
+        start; the joints carrying the arm need more to hold it). Calibrate once per arm: it stores
+        each joint's real range in its servo, and each slider then covers only
+        that range. Until then, 0–4095 is one full turn with 0 and 4095 the same
+        spot: a move of more than half a turn is refused, and a joint that slips
+        across that spot is stopped and held where it is.
         <b>Release drops the arm.</b> Support it first.</p>
       </div>
       {% else %}
@@ -680,6 +696,11 @@
     // they follow the arm, so moving a joint by hand shows which slider it is.
     // A moving slider is sent at most every 120 ms, and once more on release.
     const armDeg = (v) => Math.round(v * 360 / 4096) + '°/s';   // 4096 steps per turn
+    const deg = (steps) => Math.round(steps * 360 / 4096) + '°';
+    // Joint spans from ElRobot's follower URDF (hardware/elrobot/simulation/
+    // elrobot_follower.urdf), in steps. A recorded span far from these means a
+    // joint did not reach both of its end stops.
+    const URDF_SPAN = [2022, 2102, 2296, 2286, 3828, 2048, 3869, 1436];
 
     document.querySelectorAll('.arm-panel').forEach((card) => {
       const name    = card.dataset.arm;
@@ -691,22 +712,77 @@
       const cam     = card.querySelector('.arm-cam');
       const speed   = card.querySelector('.arm-speed');
       const speedV  = card.querySelector('.arm-speed-val');
+      const strength  = card.querySelector('.arm-strength');
+      const strengthV = card.querySelector('.arm-strength-val');
+      let strengthTouched = false;
       const rows    = [...card.querySelectorAll('.arm-joint')];
       if (!body || !toggle) return;
       let open = false, torque = false, poll = null, speedTouched = false;
+      // Calibration recording: per joint the last raw reading, the reading
+      // followed continuously through the 0/4095 seam, and its lowest/highest.
+      let cal = null;
+      const calBtn = card.querySelector('.arm-cal');
+      const calSave = card.querySelector('.arm-cal-save');
+      const calCancel = card.querySelector('.arm-cal-cancel');
+      const calHint = card.querySelector('.arm-cal-hint');
+
+      function calTrack(pos) {
+        pos.forEach((p, i) => {
+          if (p === undefined || p < 0) return;
+          if (cal.last[i] === undefined) {
+            cal.last[i] = cal.acc[i] = cal.lo[i] = cal.hi[i] = p;
+            return;
+          }
+          let d = p - cal.last[i];
+          if (d > 2048) d -= 4096; else if (d < -2048) d += 4096;
+          cal.last[i] = p;
+          cal.acc[i] += d;
+          cal.lo[i] = Math.min(cal.lo[i], cal.acc[i]);
+          cal.hi[i] = Math.max(cal.hi[i], cal.acc[i]);
+        });
+      }
+      const calSpan = (i) => (cal.hi[i] === undefined ? 0 : cal.hi[i] - cal.lo[i]);
+      const calOk = (i) => Math.abs(calSpan(i) / URDF_SPAN[i] - 1) <= 0.15;
+
+      function setPollEvery(ms) {
+        clearInterval(poll);
+        poll = setInterval(refresh, ms);
+      }
+      function calMode(on) {
+        cal = on ? { last: [], acc: [], lo: [], hi: [] } : null;
+        calBtn.hidden = on;
+        calSave.hidden = calCancel.hidden = calHint.hidden = !on;
+        setPollEvery(on ? 150 : 1000);
+      }
       const dragging = new Set(), lastSent = {}, pending = {};
 
       function paint(s) {
         if (s.speed && !speedTouched) { speed.value = s.speed; speedV.textContent = armDeg(s.speed); }
+        if (s.strength && !strengthTouched) {
+          strength.value = Math.round(s.strength / 10);
+          strengthV.textContent = Math.round(s.strength / 10) + '%';
+        }
         torque = !!s.torque;
         status.classList.remove('err');
         status.classList.toggle('on', torque);
         text.textContent = torque ? 'torque on' : 'limp';
+        (s.seam || []).forEach((tripped, i) => {
+          if (tripped) showToast('J' + (i + 1) + ' crossed its 0/4095 seam — stopped, holding where it is');
+        });
+        if (cal) calTrack(s.pos || []);
         rows.forEach((row, i) => {
           const slider = row.querySelector('input');
           const val = row.querySelector('.val');
           const pos = (s.pos || [])[i];
-          slider.disabled = !torque;
+          const lo = (s.min || [])[i], hi = (s.max || [])[i];
+          // The servo's own limits, once calibrated; a full turn until then.
+          if (lo >= 0 && hi > lo && !(lo === 0 && hi === 4095)) { slider.min = lo; slider.max = hi; }
+          else { slider.min = 0; slider.max = 4095; }
+          slider.disabled = !torque || !!cal;
+          if (cal) {
+            val.textContent = deg(calSpan(i)) + '/' + deg(URDF_SPAN[i]) + (calOk(i) ? ' ✓' : ' ⚠');
+            return;
+          }
           if (pos === undefined || pos < 0) { val.textContent = 'no reply'; return; }
           val.textContent = pos + ((s.load || [])[i] > 0 ? ' ·' + s.load[i] + '%' : '');
           if (!torque || (!dragging.has(i) && pending[i] === undefined)) slider.value = pos;
@@ -740,6 +816,12 @@
       });
 
       speed.addEventListener('input', () => { speedTouched = true; speedV.textContent = armDeg(speed.value); });
+      strength.addEventListener('input', () => { strengthTouched = true; strengthV.textContent = strength.value + '%'; });
+      strength.addEventListener('change', async () => {
+        try { strengthV.textContent = (await api(base + '/strength', 'POST', { percent: Number(strength.value) })).percent + '%'; }
+        catch (e) { showToast(e.message); }
+        strengthTouched = false;
+      });
       speed.addEventListener('change', async () => {
         try { speedV.textContent = armDeg((await api(base + '/speed', 'POST', { speed: Number(speed.value) })).speed); }
         catch (e) { showToast(e.message); }
@@ -756,10 +838,36 @@
           refresh();
           poll = setInterval(refresh, 1000);
         } else {
+          if (cal) calMode(false);
           clearInterval(poll);
           cam.removeAttribute('src');
           text.textContent = torque ? 'torque on' : 'closed';
         }
+      });
+
+      calBtn.addEventListener('click', () => {
+        if (torque) { showToast('Release torque first — support the arm'); return; }
+        calMode(true);
+        showToast('Recording — move every joint end to end');
+      });
+      calCancel.addEventListener('click', () => { calMode(false); refresh(); });
+      calSave.addEventListener('click', async () => {
+        const off = URDF_SPAN.map((spec, i) => [i, calSpan(i), spec]).filter(([i]) => !calOk(i));
+        if (off.length && !confirm('These joints do not match ElRobot\'s spec:\n' +
+            off.map(([i, got, spec]) => `J${i + 1}: ${deg(got)} measured, ${deg(spec)} spec`).join('\n') +
+            '\n\nSave them anyway? (Joints that barely moved are skipped.)')) return;
+        let ok = 0, failed = [];
+        for (let i = 0; i < rows.length; i++) {
+          const span = calSpan(i);
+          if (span < 200) { failed.push(`J${i + 1} skipped (not moved)`); continue; }
+          const mid = ((Math.round((cal.lo[i] + cal.hi[i]) / 2) % 4096) + 4096) % 4096;
+          const half = Math.min(2047, Math.floor(span / 2));
+          try { await api(base + '/calibrate', 'POST', { joint: i + 1, mid, half_span: half }); ok++; }
+          catch (e) { failed.push(`J${i + 1}: ${e.message}`); }
+        }
+        calMode(false);
+        refresh();
+        showToast(`Calibrated ${ok}/${rows.length}` + (failed.length ? ' — ' + failed.join('; ') : ''));
       });
 
       card.querySelector('.arm-enable').addEventListener('click', async () => {
