@@ -208,7 +208,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
     </details>
 
     <details>
-      <summary>Neck <small>2× SG90</small></summary>
+      <summary>Neck <small>2× STS3215 · IDs 21, 22</small></summary>
       <div class="body" id="neck">
         <label class="check"><input type="checkbox" id="follow"> Face follows the camera</label>
       </div>
@@ -271,7 +271,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
           <li><b>Mass model:</b> printed parts from their Fusion volumes, arm links from the ElRobot URDF, the rest from datasheets or estimates (<code>sim/web/tools/physics.py</code>).</li>
           <li><b>Dock:</b> <code>charging-dock-v1</code>; the robot starts on it. Drive forward to leave, and back into it within 4 mm and 3° to charge. The sign glows green while Gerdoo is home and amber while it's away, as <code>dock/dock_light</code> does on the real one.</li>
           <li><b>Casters:</b> 1" soft-rubber swivel casters, 25 mm wheel, 10 mm trail (typical; measure yours). The listing's 37.8 mm height is 1.3 mm more than the gap under the caster blocks, so the sim fits them to 36.5 mm.</li>
-          <li><b>Approximate:</b> the neck gimbal's two axes, the Brio, and the scan height. Wheels roll without slipping and there is no physics.</li>
+          <li><b>Neck:</b> <code>neck-v1</code>, two STS3215s (pan ±90°, tilt 15° down to 30° up) carrying your screen, its board bracket and the Brio. The lidar sits 45 mm higher on <code>lidar-holder-v2</code>. <b>Approximate:</b> the Brio's shape and the driver board (not drawn). Wheels roll without slipping and there is no physics.</li>
         </ul>
       </div>
     </details>
@@ -327,7 +327,7 @@ const WHEEL_R = 0.03315, TRACK = 0.2913;
 const CASTERS = { front: { x: 0.09, theta: 0, spin: 0 }, back: { x: -0.09, theta: 0, spin: 0 } };
 const CASTER_R = 0.0125, CASTER_TRAIL = 0.010;
 // mass model: arm links from the ElRobot URDF inertials, the rest from tools/physics.py (Fusion volumes + parts list)
-const MASS = {"links":{"ST3215_1_v1_1":[31.91,4e-06,0.02269,-0.001424],"Joint_01_1":[36.02,0.000193,0.010535,-0.002903],"ST3215_2_v1_1":[31.91,-0.001424,-0.000194,0.022689],"Joint_02_1":[43.13,0.020187,-0.000361,0.040489],"ST3215_3_v1_1":[31.91,-0.001226,-0.000194,0.022701],"Joint_03_v1_1":[37.05,0.021383,0.002597,0.028573],"ST3215_4_v1_1":[31.91,-0.001424,0.022689,0.000219],"Joint_04_v1_1":[49.11,0.020415,0.046348,0.000473],"ST3215_5_v1_1":[31.91,0.000383,-0.001621,0.022431],"Joint_05_v1_1":[15.03,-0.001451,0.014886,0.000239],"ST3215_6_v1_1":[31.91,-0.001229,0.022701,1.8e-05],"Joint_06_v1_1":[37.28,0.020434,0.031977,0.000356],"ST3215_7_v1_1":[31.91,0.000373,-0.001426,0.022445],"Gripper_Base_v1_1":[46.9,0.000561,0.03192,-0.000595],"ST3215_8_v1_1":[31.91,-0.000546,-0.018926,-0.012206],"Gripper_Gear_v1_1":[2.48,6.4e-05,0.003756,-3.4e-05],"Gripper_Jaw_02_v1_1":[12.49,-0.338681,0.262592,-0.030317],"Gripper_Jaw_01_v1_1":[12.49,-0.279442,0.305316,0.04628]},"body":{"mass_g":4397,"cog_mm":[-1.3,0.3,122.0]}};
+const MASS = {"links":{"ST3215_1_v1_1":[31.91,4e-06,0.02269,-0.001424],"Joint_01_1":[36.02,0.000193,0.010535,-0.002903],"ST3215_2_v1_1":[31.91,-0.001424,-0.000194,0.022689],"Joint_02_1":[43.13,0.020187,-0.000361,0.040489],"ST3215_3_v1_1":[31.91,-0.001226,-0.000194,0.022701],"Joint_03_v1_1":[37.05,0.021383,0.002597,0.028573],"ST3215_4_v1_1":[31.91,-0.001424,0.022689,0.000219],"Joint_04_v1_1":[49.11,0.020415,0.046348,0.000473],"ST3215_5_v1_1":[31.91,0.000383,-0.001621,0.022431],"Joint_05_v1_1":[15.03,-0.001451,0.014886,0.000239],"ST3215_6_v1_1":[31.91,-0.001229,0.022701,1.8e-05],"Joint_06_v1_1":[37.28,0.020434,0.031977,0.000356],"ST3215_7_v1_1":[31.91,0.000373,-0.001426,0.022445],"Gripper_Base_v1_1":[46.9,0.000561,0.03192,-0.000595],"ST3215_8_v1_1":[31.91,-0.000546,-0.018926,-0.012206],"Gripper_Gear_v1_1":[2.48,6.4e-05,0.003756,-3.4e-05],"Gripper_Jaw_02_v1_1":[12.49,-0.338681,0.262592,-0.030317],"Gripper_Jaw_01_v1_1":[12.49,-0.279442,0.305316,0.04628]},"body":{"mass_g":4547,"cog_mm":[1.2,0.3,131.1]}};
 
 // ---------- renderer, scene, camera ----------
 const canvas = $('view');
@@ -524,7 +524,7 @@ function planeFacingX(w, h) {
 }
 function addFaceScreen() {
   const m = new THREE.Mesh(planeFacingX(0.118, 0.066), new THREE.MeshBasicMaterial({ map: faceTex }));
-  m.position.set(0.0272, -0.0005, 0.001);
+  m.position.set(0.0202, 0.0, 0.026);   // screen face, 20 mm in front of the tilt axis and 26 mm above it (neck v1)
   robot.links.neck_tilt.add(m);
 }
 function drawFace(t) {
@@ -939,9 +939,9 @@ new STLLoader().load('meshes/gerdoo/dock.stl', (g) => {
 });
 // the sign head's light box: green when Gerdoo is home, amber when away (dock/dock_light)
 const dockGlow = new THREE.PointLight(0xffa000, 0, 1.1, 1.4);
-dockGlow.position.set(-0.235, 0.40, 0);              // just behind the open back of the light box
+dockGlow.position.set(-0.235, 0.445, 0);              // just behind the open back of the light box
 const glowLine = new THREE.Mesh(new THREE.BoxGeometry(0.002, 0.0025, 0.19), new THREE.MeshBasicMaterial({ color: 0xffa000 }));
-glowLine.position.set(-0.1595, 0.3855, 0);           // the diffuser line under GERDOO
+glowLine.position.set(-0.1595, 0.4305, 0);           // the diffuser line under GERDOO
 room.add(dockGlow, glowLine);
 function dockState() {
   const chip = $('chip-dock');
