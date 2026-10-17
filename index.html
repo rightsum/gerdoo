@@ -148,7 +148,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 
 <div class="app">
   <header class="top">
-    <div class="brand"><b>gerdoo</b><span>arms, body and lidar playground · Fusion preview of 16 Oct 2026</span></div>
+    <div class="brand"><b>gerdoo</b><span>arms, body and lidar playground · Fusion preview of 17 Oct 2026</span></div>
     <div class="chips" aria-live="polite">
       <span class="chip" id="chip-clash"><i></i><span>Loading</span></span>
       <span class="chip" id="chip-lidar"><i></i><span>Lidar</span></span>
@@ -240,7 +240,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
         <label class="check"><input type="checkbox" id="show-scan" checked> Show the scan</label>
         <label class="check"><input type="checkbox" id="show-room" checked> Show the room</label>
         <div class="readout" id="lidar-readout">—</div>
-        <p class="note">360 beams, one per degree, in the plane 30 mm above the C1's base. Red beams end on gerdoo itself.</p>
+        <p class="note">360 beams, one per degree, in the plane 30 mm above the C1's base. Red beams end on gerdoo itself; green ones on the dock's sign, the 120° V between two ribs that the C1 uses to find home.</p>
       </div>
     </details>
 
@@ -327,7 +327,7 @@ const WHEEL_R = 0.03315, TRACK = 0.2913;
 const CASTERS = { front: { x: 0.09, theta: 0, spin: 0 }, back: { x: -0.09, theta: 0, spin: 0 } };
 const CASTER_R = 0.0125, CASTER_TRAIL = 0.010;
 // mass model: arm links from the ElRobot URDF inertials, the rest from tools/physics.py (Fusion volumes + parts list)
-const MASS = {"links":{"ST3215_1_v1_1":[31.91,4e-06,0.02269,-0.001424],"Joint_01_1":[36.02,0.000193,0.010535,-0.002903],"ST3215_2_v1_1":[31.91,-0.001424,-0.000194,0.022689],"Joint_02_1":[43.13,0.020187,-0.000361,0.040489],"ST3215_3_v1_1":[31.91,-0.001226,-0.000194,0.022701],"Joint_03_v1_1":[37.05,0.021383,0.002597,0.028573],"ST3215_4_v1_1":[31.91,-0.001424,0.022689,0.000219],"Joint_04_v1_1":[49.11,0.020415,0.046348,0.000473],"ST3215_5_v1_1":[31.91,0.000383,-0.001621,0.022431],"Joint_05_v1_1":[15.03,-0.001451,0.014886,0.000239],"ST3215_6_v1_1":[31.91,-0.001229,0.022701,1.8e-05],"Joint_06_v1_1":[37.28,0.020434,0.031977,0.000356],"ST3215_7_v1_1":[31.91,0.000373,-0.001426,0.022445],"Gripper_Base_v1_1":[46.9,0.000561,0.03192,-0.000595],"ST3215_8_v1_1":[31.91,-0.000546,-0.018926,-0.012206],"Gripper_Gear_v1_1":[2.48,6.4e-05,0.003756,-3.4e-05],"Gripper_Jaw_02_v1_1":[12.49,-0.338681,0.262592,-0.030317],"Gripper_Jaw_01_v1_1":[12.49,-0.279442,0.305316,0.04628]},"body":{"mass_g":4381,"cog_mm":[-1.2,0.3,122.2]}};
+const MASS = {"links":{"ST3215_1_v1_1":[31.91,4e-06,0.02269,-0.001424],"Joint_01_1":[36.02,0.000193,0.010535,-0.002903],"ST3215_2_v1_1":[31.91,-0.001424,-0.000194,0.022689],"Joint_02_1":[43.13,0.020187,-0.000361,0.040489],"ST3215_3_v1_1":[31.91,-0.001226,-0.000194,0.022701],"Joint_03_v1_1":[37.05,0.021383,0.002597,0.028573],"ST3215_4_v1_1":[31.91,-0.001424,0.022689,0.000219],"Joint_04_v1_1":[49.11,0.020415,0.046348,0.000473],"ST3215_5_v1_1":[31.91,0.000383,-0.001621,0.022431],"Joint_05_v1_1":[15.03,-0.001451,0.014886,0.000239],"ST3215_6_v1_1":[31.91,-0.001229,0.022701,1.8e-05],"Joint_06_v1_1":[37.28,0.020434,0.031977,0.000356],"ST3215_7_v1_1":[31.91,0.000373,-0.001426,0.022445],"Gripper_Base_v1_1":[46.9,0.000561,0.03192,-0.000595],"ST3215_8_v1_1":[31.91,-0.000546,-0.018926,-0.012206],"Gripper_Gear_v1_1":[2.48,6.4e-05,0.003756,-3.4e-05],"Gripper_Jaw_02_v1_1":[12.49,-0.338681,0.262592,-0.030317],"Gripper_Jaw_01_v1_1":[12.49,-0.279442,0.305316,0.04628]},"body":{"mass_g":4397,"cog_mm":[-1.3,0.3,122.0]}};
 
 // ---------- renderer, scene, camera ----------
 const canvas = $('view');
@@ -856,8 +856,9 @@ const scanPoints = new THREE.Points(scanGeom, new THREE.PointsMaterial({ size: 0
 scanPoints.frustumCulled = false;
 scene.add(scanPoints);
 const scan = new Float32Array(NRAYS).fill(Infinity);
-const scanSelf = new Uint8Array(NRAYS);
-let lidarBlocked = 0;
+const scanSelf = new Uint8Array(NRAYS);   // 1 = ends on gerdoo, 2 = ends on the dock (its sign is at scan height)
+let lidarBlocked = 0, dockSeen = null;
+const dockGreen = new THREE.Color(0x2fd27a);
 const origin = new THREE.Vector3(), dir = new THREE.Vector3();
 function runLidar() {
   if (!lidarOrigin) return;
@@ -867,25 +868,31 @@ function runLidar() {
   const P = scanGeom.attributes.position.array, C = scanGeom.attributes.color.array;
   const amber = cssColor('--accent'), red = new THREE.Color(0xff4d4f);
   lidarBlocked = 0;
+  let dn = 0, dmin = Infinity, sx = 0, sy = 0;
   for (let i = 0; i < NRAYS; i++) {
     const a = pose.yaw + i * Math.PI / 180;
     dir.set(Math.cos(a), 0, -Math.sin(a));
     raycaster.set(origin, dir);
-    const hit = raycaster.intersectObjects(targets, false)[0];
+    const hit = raycaster.intersectObjects(targets, true)[0];
     const self = !!(hit && hit.object.userData.label && hit.object.parent && linkOf(hit.object));
+    const onDock = !!(hit && hit.object.userData.dock);
     scan[i] = hit ? hit.distance : Infinity;
-    scanSelf[i] = self ? 1 : 0;
+    scanSelf[i] = self ? 1 : onDock ? 2 : 0;
     if (self) lidarBlocked++;
+    if (onDock) { dn++; dmin = Math.min(dmin, hit.distance); sx += Math.cos(i * Math.PI / 180); sy += Math.sin(i * Math.PI / 180); }
     const p = hit ? hit.point : origin.clone().addScaledVector(dir, 0.0);
     P[i * 3] = p.x; P[i * 3 + 1] = hit ? p.y : -10; P[i * 3 + 2] = p.z;
-    const c = self ? red : amber; C[i * 3] = c.r; C[i * 3 + 1] = c.g; C[i * 3 + 2] = c.b;
+    const c = self ? red : onDock ? dockGreen : amber; C[i * 3] = c.r; C[i * 3 + 1] = c.g; C[i * 3 + 2] = c.b;
   }
   scanGeom.attributes.position.needsUpdate = true; scanGeom.attributes.color.needsUpdate = true;
   const chip = $('chip-lidar');
   chip.className = lidarBlocked ? 'chip bad' : 'chip';
   chip.lastChild.textContent = lidarBlocked ? `Lidar: gerdoo blocks ${lidarBlocked}°` : 'Lidar sees 360°';
   const seen = [...scan].filter((d) => d < Infinity && d > 0.25);
-  $('lidar-readout').textContent = `${lidarBlocked}° blocked by gerdoo · nearest object ${seen.length ? Math.min(...seen).toFixed(2) + ' m' : 'none'} · scan height ${(origin.y * 1000).toFixed(0)} mm`;
+  // bearing: degrees counter-clockwise from gerdoo's forward, so the dock behind it reads ~180
+  dockSeen = dn ? { beams: dn, nearest: dmin, bearing: ((Math.atan2(sy, sx) * 180 / Math.PI) + 360) % 360 } : null;
+  const dockTxt = dockSeen ? `dock sign ${dockSeen.beams} beams, ${dockSeen.nearest.toFixed(2)} m at ${dockSeen.bearing.toFixed(0)}°` : 'dock sign not in view';
+  $('lidar-readout').textContent = `${lidarBlocked}° blocked by gerdoo · ${dockTxt} · nearest object ${seen.length ? Math.min(...seen).toFixed(2) + ' m' : 'none'} · scan height ${(origin.y * 1000).toFixed(0)} mm`;
   drawScan();
 }
 function drawScan() {
@@ -901,7 +908,7 @@ function drawScan() {
     const d = scan[i]; if (!(d < 2.6)) continue;
     const ang = i * Math.PI / 180;  // CCW from forward; forward is up on the map
     const x = R - Math.sin(ang) * d * px, y = R - Math.cos(ang) * d * px;
-    a.fillStyle = scanSelf[i] ? '#ff4d4f' : accent;
+    a.fillStyle = scanSelf[i] === 1 ? '#ff4d4f' : scanSelf[i] === 2 ? '#2fd27a' : accent;
     a.fillRect(x - 2.5, y - 2.5, 5, 5);
   }
 }
@@ -909,12 +916,15 @@ function drawScan() {
 // ---------- dock ----------
 let dockReady = false;
 new STLLoader().load('meshes/gerdoo/dock_letters.stl', (g) => {
+  g.computeBoundsTree();
   const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0xffae1e, roughness: 0.45 }));
+  m.userData.dock = true;
   const h = new THREE.Group(); h.rotation.x = -Math.PI / 2; h.scale.setScalar(0.001); h.add(m); room.add(h);
 });
 new STLLoader().load('meshes/gerdoo/dock.stl', (g) => {
   g.computeBoundsTree();
   const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0x4a5561, roughness: 0.7 }));
+  m.userData.dock = true;   // the sign head's V and ribs sit in the C1's scan plane (log 032)
   const holder = new THREE.Group();
   holder.rotation.x = -Math.PI / 2; holder.scale.setScalar(0.001);
   holder.add(m); m.castShadow = true; m.receiveShadow = true;
@@ -1100,6 +1110,12 @@ function runSelfTest() {
   updateStability(); out.reach_loaded_after_reverse = { brake: +lastStability.brake.toFixed(2), front_contact: Math.round(POLY[0][0]), back_contact: Math.round(POLY[2][0]), drove_m: +pose.x.toFixed(2) };
   $('payload').checked = false; pose.x = pose.z = pose.yaw = 0; placeRig();
   setPose('rest'); checkContacts(); runLidar();
+  out.dock_sign = {};
+  for (const [name, x] of [['on_dock', 0], ['out_0.5m', 0.5], ['out_1.5m', 1.5]]) {
+    pose.x = x; placeRig(); rig.updateMatrixWorld(true); runLidar();
+    out.dock_sign[name] = dockSeen ? { beams: dockSeen.beams, nearest_m: +dockSeen.nearest.toFixed(3), bearing: Math.round(dockSeen.bearing) } : null;
+  }
+  pose.x = 0; placeRig(); runLidar();
   const pre = document.createElement('pre');
   pre.id = 'selftest-result'; pre.hidden = true;
   pre.textContent = JSON.stringify({ meshes: { L: armMeshes.L.length, R: armMeshes.R.length, body: bodyMeshes.length }, poses: out });
