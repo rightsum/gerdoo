@@ -677,7 +677,7 @@
     <mimic joint="L_gripper" multiplier="0.0115" offset="0" />
   </joint>
   <joint name="L_mount" type="fixed">
-    <origin xyz="-0.04249 0.14568 0.1043" rpy="0 0 -1.570796" />
+    <origin xyz="-0.0145324 0.105752 0.1043" rpy="0 0 -0.349066" />
     <parent link="base_link" />
     <child link="L_base_link" />
   </joint>
@@ -994,7 +994,7 @@
     <mimic joint="R_gripper" multiplier="0.0115" offset="0" />
   </joint>
   <joint name="R_mount" type="fixed">
-    <origin xyz="-0.04249 -0.14568 0.1043" rpy="0 0 -1.570796" />
+    <origin xyz="-0.0145324 -0.105752 0.1043" rpy="0 0 -2.792527" />
     <parent link="base_link" />
     <child link="R_base_link" />
   </joint>

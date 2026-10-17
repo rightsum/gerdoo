@@ -304,15 +304,15 @@ const DEG = 180 / Math.PI;
 
 // ---------- presets (left arm, radians; the right arm mirrors J1, J5, J7) ----------
 const POSES = {
-  rest:  { j1: 0, j2: 0, j3: 0, j4: 0, j5: 0, j6: 0, j7: 0, gripper: 0 },
-  reach: { j1: 0.08, j2: 0.78, j3: -0.47, j4: -0.47, j5: -0.02, j6: 0.18, j7: -0.13, gripper: 0.9 },
-  up:    { j1: 0, j2: -0.11, j3: -0.72, j4: -0.5, j5: 0.46, j6: -0.39, j7: -0.11, gripper: 0.3 },
-  low:   { j1: 0.09, j2: 0.62, j3: 0.37, j4: -0.12, j5: 0.4, j6: 0.13, j7: -0.28, gripper: 1.4 },
-  meet:  { j1: -0.31, j2: -0.42, j3: 0.71, j4: 0.12, j5: -0.34, j6: -0.85, j7: -0.21, gripper: 0.2 },
+  rest:  { j1: -1.2217, j2: 0, j3: 0, j4: 0, j5: 0, j6: 0, j7: 0, gripper: 0 },
+  reach: { j1: -1.1417, j2: 0.78, j3: -0.47, j4: -0.47, j5: -0.02, j6: 0.18, j7: -0.13, gripper: 0.9 },
+  up:    { j1: -1.2217, j2: -0.11, j3: -0.72, j4: -0.5, j5: 0.46, j6: -0.39, j7: -0.11, gripper: 0.3 },
+  low:   { j1: -1.1317, j2: 0.62, j3: 0.37, j4: -0.12, j5: 0.4, j6: 0.13, j7: -0.28, gripper: 1.4 },
+  meet:  { j1: -1.5317, j2: -0.42, j3: 0.71, j4: 0.12, j5: -0.34, j6: -0.85, j7: -0.21, gripper: 0.2 },
 };
 const MIRROR = { j1: -1, j2: 1, j3: 1, j4: 1, j5: -1, j6: 1, j7: -1, gripper: 1 };
 const JOINT_INFO = {
-  j1: 'base yaw', j2: 'shoulder', j3: 'elbow', j4: 'forearm', j5: 'wrist roll', j6: 'wrist pitch', j7: 'hand roll', gripper: 'gripper',
+  j1: 'base yaw (−70° = front)', j2: 'shoulder', j3: 'elbow', j4: 'forearm', j5: 'wrist roll', j6: 'wrist pitch', j7: 'hand roll', gripper: 'gripper',
 };
 const ID_BASE = { L: 1, R: 11 };
 const BODY_NAMES = {
@@ -327,7 +327,7 @@ const WHEEL_R = 0.03315, TRACK = 0.2913;
 const CASTERS = { front: { x: 0.09, theta: 0, spin: 0 }, back: { x: -0.09, theta: 0, spin: 0 } };
 const CASTER_R = 0.0125, CASTER_TRAIL = 0.010;
 // mass model: arm links from the ElRobot URDF inertials, the rest from tools/physics.py (Fusion volumes + parts list)
-const MASS = {"links":{"ST3215_1_v1_1":[31.91,4e-06,0.02269,-0.001424],"Joint_01_1":[36.02,0.000193,0.010535,-0.002903],"ST3215_2_v1_1":[31.91,-0.001424,-0.000194,0.022689],"Joint_02_1":[43.13,0.020187,-0.000361,0.040489],"ST3215_3_v1_1":[31.91,-0.001226,-0.000194,0.022701],"Joint_03_v1_1":[37.05,0.021383,0.002597,0.028573],"ST3215_4_v1_1":[31.91,-0.001424,0.022689,0.000219],"Joint_04_v1_1":[49.11,0.020415,0.046348,0.000473],"ST3215_5_v1_1":[31.91,0.000383,-0.001621,0.022431],"Joint_05_v1_1":[15.03,-0.001451,0.014886,0.000239],"ST3215_6_v1_1":[31.91,-0.001229,0.022701,1.8e-05],"Joint_06_v1_1":[37.28,0.020434,0.031977,0.000356],"ST3215_7_v1_1":[31.91,0.000373,-0.001426,0.022445],"Gripper_Base_v1_1":[46.9,0.000561,0.03192,-0.000595],"ST3215_8_v1_1":[31.91,-0.000546,-0.018926,-0.012206],"Gripper_Gear_v1_1":[2.48,6.4e-05,0.003756,-3.4e-05],"Gripper_Jaw_02_v1_1":[12.49,-0.338681,0.262592,-0.030317],"Gripper_Jaw_01_v1_1":[12.49,-0.279442,0.305316,0.04628]},"body":{"mass_g":4423,"cog_mm":[-1.9,0.3,123.1]}};
+const MASS = {"links":{"ST3215_1_v1_1":[31.91,4e-06,0.02269,-0.001424],"Joint_01_1":[36.02,0.000193,0.010535,-0.002903],"ST3215_2_v1_1":[31.91,-0.001424,-0.000194,0.022689],"Joint_02_1":[43.13,0.020187,-0.000361,0.040489],"ST3215_3_v1_1":[31.91,-0.001226,-0.000194,0.022701],"Joint_03_v1_1":[37.05,0.021383,0.002597,0.028573],"ST3215_4_v1_1":[31.91,-0.001424,0.022689,0.000219],"Joint_04_v1_1":[49.11,0.020415,0.046348,0.000473],"ST3215_5_v1_1":[31.91,0.000383,-0.001621,0.022431],"Joint_05_v1_1":[15.03,-0.001451,0.014886,0.000239],"ST3215_6_v1_1":[31.91,-0.001229,0.022701,1.8e-05],"Joint_06_v1_1":[37.28,0.020434,0.031977,0.000356],"ST3215_7_v1_1":[31.91,0.000373,-0.001426,0.022445],"Gripper_Base_v1_1":[46.9,0.000561,0.03192,-0.000595],"ST3215_8_v1_1":[31.91,-0.000546,-0.018926,-0.012206],"Gripper_Gear_v1_1":[2.48,6.4e-05,0.003756,-3.4e-05],"Gripper_Jaw_02_v1_1":[12.49,-0.338681,0.262592,-0.030317],"Gripper_Jaw_01_v1_1":[12.49,-0.279442,0.305316,0.04628]},"body":{"mass_g":4381,"cog_mm":[-1.2,0.3,122.2]}};
 
 // ---------- renderer, scene, camera ----------
 const canvas = $('view');
@@ -920,8 +920,8 @@ new STLLoader().load('meshes/gerdoo/dock.stl', (g) => {
   holder.add(m); m.castShadow = true; m.receiveShadow = true;
   const copper = new THREE.MeshStandardMaterial({ color: 0xc9824f, metalness: 0.8, roughness: 0.35 });
   for (const y of [20, -20]) {
-    const plate = new THREE.Mesh(new THREE.BoxGeometry(1.6, 34.2, 43.7), copper);   // the user's copper-clad plates
-    plate.position.set(-130.65, y, 88.7);
+    const plate = new THREE.Mesh(new THREE.BoxGeometry(1.5, 34.2, 43.7), copper);   // the user's copper-clad plates
+    plate.position.set(-130.6, y, 88.7);
     holder.add(plate);
   }
   room.add(holder);
@@ -1080,7 +1080,7 @@ function runSelfTest() {
     let line = '';
     for (let d = -180; d <= 180; d += 5) {
       j.setJointValue(d * Math.PI / 180); robot.updateMatrixWorld(true); checkContacts();
-      line += lastHits.some(([a]) => a.userData.link.startsWith('L_')) ? 'x' : '.';
+      line += lastHits.some(([a]) => a.userData.link.startsWith('L_')) ? 'x' : '.';   // J1 value; arm direction = J1 + 70 deg
     }
     j.ignoreLimits = false;
     out.j1_sweep[pname] = line;   // -180..180 in 5 deg steps; + is outward for the left arm
