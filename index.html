@@ -185,6 +185,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
       <summary>Poses <small>both arms</small></summary>
       <div class="body">
         <div class="row" id="presets">
+          <button class="btn" type="button" data-pose="idle">Idle</button>
           <button class="btn" type="button" data-pose="rest">Rest</button>
           <button class="btn" type="button" data-pose="reach">Reach out</button>
           <button class="btn" type="button" data-pose="up">Hands up</button>
@@ -304,6 +305,8 @@ const DEG = 180 / Math.PI;
 
 // ---------- presets (left arm, radians; the right arm mirrors J1, J5, J7) ----------
 const POSES = {
+  // idle: the user's pose, arms folded down beside the body (J1 -73, J2 52, J3 33, J4 -9, J5 135, J6 101, J7 81 deg, gripper 74 %)
+  idle:  { j1: -1.2741, j2: 0.9076, j3: 0.5760, j4: -0.1571, j5: 2.3562, j6: 1.7628, j7: 1.4137, gripper: 1.6301 },
   rest:  { j1: -1.2217, j2: 0, j3: 0, j4: 0, j5: 0, j6: 0, j7: 0, gripper: 0 },
   reach: { j1: -1.1417, j2: 0.78, j3: -0.47, j4: -0.47, j5: -0.02, j6: 0.18, j7: -0.13, gripper: 0.9 },
   up:    { j1: -1.2217, j2: -0.11, j3: -0.72, j4: -0.5, j5: 0.46, j6: -0.39, j7: -0.11, gripper: 0.3 },
@@ -489,7 +492,7 @@ function init() {
   buildArmControls('L'); buildArmControls('R'); buildNeckControls();
   applyTheme();
   setView('iso', true);
-  setPose('rest');
+  setPose('idle');                     // starts in the idle pose
   $('loading').hidden = true;
   resize();
   dirty = true;

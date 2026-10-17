@@ -166,7 +166,7 @@
     </visual>
   </link>
   <joint name="neck_pan" type="revolute">
-    <origin xyz="0.095 0 0.2759" rpy="0 0 0" />
+    <origin xyz="0.095 0 0.2844" rpy="0 0 0" />
     <axis xyz="0 0 1" />
     <parent link="base_link" />
     <child link="neck_pan" />
@@ -184,7 +184,7 @@
     </visual>
   </link>
   <joint name="neck_tilt" type="revolute">
-    <origin xyz="-0.0005 0 0.0268" rpy="0 0 0" />
+    <origin xyz="-0.0005 0 0.0183" rpy="0 0 0" />
     <axis xyz="0 -1 0" />
     <parent link="neck_pan" />
     <child link="neck_tilt" />
