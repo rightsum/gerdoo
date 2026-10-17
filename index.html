@@ -908,6 +908,10 @@ function drawScan() {
 
 // ---------- dock ----------
 let dockReady = false;
+new STLLoader().load('meshes/gerdoo/dock_letters.stl', (g) => {
+  const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0xffae1e, roughness: 0.45 }));
+  const h = new THREE.Group(); h.rotation.x = -Math.PI / 2; h.scale.setScalar(0.001); h.add(m); room.add(h);
+});
 new STLLoader().load('meshes/gerdoo/dock.stl', (g) => {
   g.computeBoundsTree();
   const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0x4a5561, roughness: 0.7 }));
@@ -915,9 +919,9 @@ new STLLoader().load('meshes/gerdoo/dock.stl', (g) => {
   holder.rotation.x = -Math.PI / 2; holder.scale.setScalar(0.001);
   holder.add(m); m.castShadow = true; m.receiveShadow = true;
   const copper = new THREE.MeshStandardMaterial({ color: 0xc9824f, metalness: 0.8, roughness: 0.35 });
-  for (const y of [12, -12]) {
-    const plate = new THREE.Mesh(new THREE.BoxGeometry(1.0, 14, 26), copper);
-    plate.position.set(-130.55, y, 88.7);
+  for (const y of [20, -20]) {
+    const plate = new THREE.Mesh(new THREE.BoxGeometry(1.6, 34.2, 43.7), copper);   // the user's copper-clad plates
+    plate.position.set(-130.65, y, 88.7);
     holder.add(plate);
   }
   room.add(holder);
@@ -1067,6 +1071,19 @@ function runSelfTest() {
     robot.updateMatrixWorld(true);
     checkContacts();
     out['test_' + k] = { contacts: [...new Set(lastHits.map(([a, b]) => `${a.userData.label} <> ${b ? b.userData.label : 'floor'}`))] };
+  }
+  out.j1_sweep = {};
+  for (const pname of ['rest', 'reach', 'low']) {
+    setPose('rest');
+    for (const [k, v] of Object.entries(POSES[pname])) if (k !== 'j1') robot.joints['L_' + k].setJointValue(v);
+    const j = robot.joints.L_j1; j.ignoreLimits = true;
+    let line = '';
+    for (let d = -180; d <= 180; d += 5) {
+      j.setJointValue(d * Math.PI / 180); robot.updateMatrixWorld(true); checkContacts();
+      line += lastHits.some(([a]) => a.userData.link.startsWith('L_')) ? 'x' : '.';
+    }
+    j.ignoreLimits = false;
+    out.j1_sweep[pname] = line;   // -180..180 in 5 deg steps; + is outward for the left arm
   }
   setPose('reach'); $('payload').checked = true;
   updateStability(); out.reach_loaded_trailing = { brake: +lastStability.brake.toFixed(2), front_contact: Math.round(POLY[0][0]), back_contact: Math.round(POLY[2][0]) };
