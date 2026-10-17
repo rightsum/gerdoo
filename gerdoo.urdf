@@ -8,7 +8,7 @@
         <mesh filename="meshes/gerdoo/deck.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="m_deck">
-        <color rgba="0.17 0.18 0.19 1" />
+        <color rgba="0.10 0.10 0.11 1" />
       </material>
     </visual>
     <visual name="floors">
@@ -17,7 +17,7 @@
         <mesh filename="meshes/gerdoo/floors.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="m_floors">
-        <color rgba="0.20 0.21 0.23 1" />
+        <color rgba="0.10 0.10 0.11 1" />
       </material>
     </visual>
     <visual name="posts">
@@ -35,7 +35,7 @@
         <mesh filename="meshes/gerdoo/cover_front.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="m_cover_front">
-        <color rgba="0.86 0.86 0.84 1" />
+        <color rgba="0.10 0.10 0.11 1" />
       </material>
     </visual>
     <visual name="cover_back">
@@ -44,7 +44,7 @@
         <mesh filename="meshes/gerdoo/cover_back.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="m_cover_back">
-        <color rgba="0.86 0.86 0.84 1" />
+        <color rgba="0.10 0.10 0.11 1" />
       </material>
     </visual>
     <visual name="electronics">
@@ -80,7 +80,7 @@
         <mesh filename="meshes/gerdoo/armbase.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="m_armbase">
-        <color rgba="0.23 0.24 0.26 1" />
+        <color rgba="0.10 0.10 0.11 1" />
       </material>
     </visual>
     <visual name="drive">
@@ -98,7 +98,7 @@
         <mesh filename="meshes/gerdoo/top.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="m_top">
-        <color rgba="0.15 0.15 0.16 1" />
+        <color rgba="0.10 0.10 0.11 1" />
       </material>
     </visual>
     <visual name="neck_static">
@@ -107,7 +107,7 @@
         <mesh filename="meshes/gerdoo/neck_static.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="m_neck_static">
-        <color rgba="0.55 0.57 0.60 1" />
+        <color rgba="0.10 0.10 0.11 1" />
       </material>
     </visual>
     <visual name="antennas">
@@ -161,7 +161,7 @@
         <mesh filename="meshes/gerdoo/neck_pan.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="m_neck_pan">
-        <color rgba="0.12 0.12 0.13 1" />
+        <color rgba="0.10 0.10 0.11 1" />
       </material>
     </visual>
   </link>
@@ -373,7 +373,7 @@
         <mesh filename="meshes/elrobot/ST3215_1_v1_1.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="servo">
-        <color rgba="0.06 0.06 0.07 1" />
+        <color rgba="0.04 0.04 0.05 1" />
       </material>
     </visual>
   </link>
@@ -384,7 +384,7 @@
         <mesh filename="meshes/elrobot/Joint_01_1.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="printed">
-        <color rgba="0.78 0.79 0.80 1" />
+        <color rgba="0.10 0.10 0.11 1" />
       </material>
     </visual>
   </link>
@@ -395,7 +395,7 @@
         <mesh filename="meshes/elrobot/ST3215_2_v1_1.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="servo">
-        <color rgba="0.06 0.06 0.07 1" />
+        <color rgba="0.04 0.04 0.05 1" />
       </material>
     </visual>
   </link>
@@ -406,7 +406,7 @@
         <mesh filename="meshes/elrobot/Joint_02_1.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="printed">
-        <color rgba="0.78 0.79 0.80 1" />
+        <color rgba="0.10 0.10 0.11 1" />
       </material>
     </visual>
   </link>
@@ -417,7 +417,7 @@
         <mesh filename="meshes/elrobot/ST3215_3_v1_1.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="servo">
-        <color rgba="0.06 0.06 0.07 1" />
+        <color rgba="0.04 0.04 0.05 1" />
       </material>
     </visual>
   </link>
@@ -428,7 +428,7 @@
         <mesh filename="meshes/elrobot/Joint_03_v1_1.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="printed">
-        <color rgba="0.78 0.79 0.80 1" />
+        <color rgba="0.10 0.10 0.11 1" />
       </material>
     </visual>
   </link>
@@ -439,7 +439,7 @@
         <mesh filename="meshes/elrobot/ST3215_4_v1_1.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="servo">
-        <color rgba="0.06 0.06 0.07 1" />
+        <color rgba="0.04 0.04 0.05 1" />
       </material>
     </visual>
   </link>
@@ -450,7 +450,7 @@
         <mesh filename="meshes/elrobot/Joint_04_v1_1.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="printed">
-        <color rgba="0.78 0.79 0.80 1" />
+        <color rgba="0.10 0.10 0.11 1" />
       </material>
     </visual>
   </link>
@@ -461,7 +461,7 @@
         <mesh filename="meshes/elrobot/ST3215_5_v1_1.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="servo">
-        <color rgba="0.06 0.06 0.07 1" />
+        <color rgba="0.04 0.04 0.05 1" />
       </material>
     </visual>
   </link>
@@ -472,7 +472,7 @@
         <mesh filename="meshes/elrobot/Joint_05_v1_1.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="printed">
-        <color rgba="0.78 0.79 0.80 1" />
+        <color rgba="0.10 0.10 0.11 1" />
       </material>
     </visual>
   </link>
@@ -483,7 +483,7 @@
         <mesh filename="meshes/elrobot/ST3215_6_v1_1.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="servo">
-        <color rgba="0.06 0.06 0.07 1" />
+        <color rgba="0.04 0.04 0.05 1" />
       </material>
     </visual>
   </link>
@@ -494,7 +494,7 @@
         <mesh filename="meshes/elrobot/Joint_06_v1_1.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="printed">
-        <color rgba="0.78 0.79 0.80 1" />
+        <color rgba="0.10 0.10 0.11 1" />
       </material>
     </visual>
   </link>
@@ -505,7 +505,7 @@
         <mesh filename="meshes/elrobot/ST3215_7_v1_1.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="servo">
-        <color rgba="0.06 0.06 0.07 1" />
+        <color rgba="0.04 0.04 0.05 1" />
       </material>
     </visual>
   </link>
@@ -516,7 +516,7 @@
         <mesh filename="meshes/elrobot/Gripper_Base_v1_1.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="printed">
-        <color rgba="0.78 0.79 0.80 1" />
+        <color rgba="0.10 0.10 0.11 1" />
       </material>
     </visual>
   </link>
@@ -527,7 +527,7 @@
         <mesh filename="meshes/elrobot/ST3215_8_v1_1.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="servo">
-        <color rgba="0.06 0.06 0.07 1" />
+        <color rgba="0.04 0.04 0.05 1" />
       </material>
     </visual>
   </link>
@@ -538,7 +538,7 @@
         <mesh filename="meshes/elrobot/Gripper_Gear_v1_1.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="printed">
-        <color rgba="0.78 0.79 0.80 1" />
+        <color rgba="0.10 0.10 0.11 1" />
       </material>
     </visual>
   </link>
@@ -549,7 +549,7 @@
         <mesh filename="meshes/elrobot/Gripper_Jaw_02_v1_1.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="printed">
-        <color rgba="0.78 0.79 0.80 1" />
+        <color rgba="0.10 0.10 0.11 1" />
       </material>
     </visual>
   </link>
@@ -560,7 +560,7 @@
         <mesh filename="meshes/elrobot/Gripper_Jaw_01_v1_1.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="printed">
-        <color rgba="0.78 0.79 0.80 1" />
+        <color rgba="0.10 0.10 0.11 1" />
       </material>
     </visual>
   </link>
@@ -690,7 +690,7 @@
         <mesh filename="meshes/elrobot/ST3215_1_v1_1.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="servo">
-        <color rgba="0.06 0.06 0.07 1" />
+        <color rgba="0.04 0.04 0.05 1" />
       </material>
     </visual>
   </link>
@@ -701,7 +701,7 @@
         <mesh filename="meshes/elrobot/Joint_01_1.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="printed">
-        <color rgba="0.78 0.79 0.80 1" />
+        <color rgba="0.10 0.10 0.11 1" />
       </material>
     </visual>
   </link>
@@ -712,7 +712,7 @@
         <mesh filename="meshes/elrobot/ST3215_2_v1_1.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="servo">
-        <color rgba="0.06 0.06 0.07 1" />
+        <color rgba="0.04 0.04 0.05 1" />
       </material>
     </visual>
   </link>
@@ -723,7 +723,7 @@
         <mesh filename="meshes/elrobot/Joint_02_1.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="printed">
-        <color rgba="0.78 0.79 0.80 1" />
+        <color rgba="0.10 0.10 0.11 1" />
       </material>
     </visual>
   </link>
@@ -734,7 +734,7 @@
         <mesh filename="meshes/elrobot/ST3215_3_v1_1.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="servo">
-        <color rgba="0.06 0.06 0.07 1" />
+        <color rgba="0.04 0.04 0.05 1" />
       </material>
     </visual>
   </link>
@@ -745,7 +745,7 @@
         <mesh filename="meshes/elrobot/Joint_03_v1_1.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="printed">
-        <color rgba="0.78 0.79 0.80 1" />
+        <color rgba="0.10 0.10 0.11 1" />
       </material>
     </visual>
   </link>
@@ -756,7 +756,7 @@
         <mesh filename="meshes/elrobot/ST3215_4_v1_1.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="servo">
-        <color rgba="0.06 0.06 0.07 1" />
+        <color rgba="0.04 0.04 0.05 1" />
       </material>
     </visual>
   </link>
@@ -767,7 +767,7 @@
         <mesh filename="meshes/elrobot/Joint_04_v1_1.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="printed">
-        <color rgba="0.78 0.79 0.80 1" />
+        <color rgba="0.10 0.10 0.11 1" />
       </material>
     </visual>
   </link>
@@ -778,7 +778,7 @@
         <mesh filename="meshes/elrobot/ST3215_5_v1_1.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="servo">
-        <color rgba="0.06 0.06 0.07 1" />
+        <color rgba="0.04 0.04 0.05 1" />
       </material>
     </visual>
   </link>
@@ -789,7 +789,7 @@
         <mesh filename="meshes/elrobot/Joint_05_v1_1.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="printed">
-        <color rgba="0.78 0.79 0.80 1" />
+        <color rgba="0.10 0.10 0.11 1" />
       </material>
     </visual>
   </link>
@@ -800,7 +800,7 @@
         <mesh filename="meshes/elrobot/ST3215_6_v1_1.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="servo">
-        <color rgba="0.06 0.06 0.07 1" />
+        <color rgba="0.04 0.04 0.05 1" />
       </material>
     </visual>
   </link>
@@ -811,7 +811,7 @@
         <mesh filename="meshes/elrobot/Joint_06_v1_1.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="printed">
-        <color rgba="0.78 0.79 0.80 1" />
+        <color rgba="0.10 0.10 0.11 1" />
       </material>
     </visual>
   </link>
@@ -822,7 +822,7 @@
         <mesh filename="meshes/elrobot/ST3215_7_v1_1.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="servo">
-        <color rgba="0.06 0.06 0.07 1" />
+        <color rgba="0.04 0.04 0.05 1" />
       </material>
     </visual>
   </link>
@@ -833,7 +833,7 @@
         <mesh filename="meshes/elrobot/Gripper_Base_v1_1.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="printed">
-        <color rgba="0.78 0.79 0.80 1" />
+        <color rgba="0.10 0.10 0.11 1" />
       </material>
     </visual>
   </link>
@@ -844,7 +844,7 @@
         <mesh filename="meshes/elrobot/ST3215_8_v1_1.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="servo">
-        <color rgba="0.06 0.06 0.07 1" />
+        <color rgba="0.04 0.04 0.05 1" />
       </material>
     </visual>
   </link>
@@ -855,7 +855,7 @@
         <mesh filename="meshes/elrobot/Gripper_Gear_v1_1.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="printed">
-        <color rgba="0.78 0.79 0.80 1" />
+        <color rgba="0.10 0.10 0.11 1" />
       </material>
     </visual>
   </link>
@@ -866,7 +866,7 @@
         <mesh filename="meshes/elrobot/Gripper_Jaw_02_v1_1.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="printed">
-        <color rgba="0.78 0.79 0.80 1" />
+        <color rgba="0.10 0.10 0.11 1" />
       </material>
     </visual>
   </link>
@@ -877,7 +877,7 @@
         <mesh filename="meshes/elrobot/Gripper_Jaw_01_v1_1.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="printed">
-        <color rgba="0.78 0.79 0.80 1" />
+        <color rgba="0.10 0.10 0.11 1" />
       </material>
     </visual>
   </link>
