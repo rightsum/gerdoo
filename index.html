@@ -269,7 +269,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
           <li><b>Arms:</b> ElRobot follower URDF from norma-core, mounted with J1 at ±145.7 mm, on gerdoo's own round arm bases.</li>
           <li><b>Contacts:</b> mesh-exact checks of every arm part against the body, the other arm and the floor. A part of one arm is not checked against the same arm, so J1 stops at ±88.9°, where its yoke meets the housing.</li>
           <li><b>Mass model:</b> printed parts from their Fusion volumes, arm links from the ElRobot URDF, the rest from datasheets or estimates (<code>sim/web/tools/physics.py</code>).</li>
-          <li><b>Dock:</b> <code>charging-dock-v1</code>; the robot starts on it. Drive forward to leave, and back into it within 4 mm and 3° to charge.</li>
+          <li><b>Dock:</b> <code>charging-dock-v1</code>; the robot starts on it. Drive forward to leave, and back into it within 4 mm and 3° to charge. The sign glows green while Gerdoo is home and amber while it's away, as <code>dock/dock_light</code> does on the real one.</li>
           <li><b>Casters:</b> 1" soft-rubber swivel casters, 25 mm wheel, 10 mm trail (typical; measure yours). The listing's 37.8 mm height is 1.3 mm more than the gap under the caster blocks, so the sim fits them to 36.5 mm.</li>
           <li><b>Approximate:</b> the neck gimbal's two axes, the Brio, and the scan height. Wheels roll without slipping and there is no physics.</li>
         </ul>
@@ -377,7 +377,7 @@ function cyl(r, h, x, y, z, mat) {
   const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 28), mat);
   m.position.set(x, y, z); m.castShadow = true; room.add(m); return m;
 }
-const ROOM = { x0: -1.7, x1: 2.7, z0: -1.75, z1: 1.75, h: 0.5 };
+const ROOM = { x0: -0.45, x1: 2.7, z0: -1.75, z1: 1.75, h: 0.5 };   // dock backs onto the wall, so its light washes it
 box(ROOM.x1 - ROOM.x0, ROOM.h, 0.05, (ROOM.x0 + ROOM.x1) / 2, ROOM.h / 2, ROOM.z0, wallMat);
 box(ROOM.x1 - ROOM.x0, ROOM.h, 0.05, (ROOM.x0 + ROOM.x1) / 2, ROOM.h / 2, ROOM.z1, wallMat);
 box(0.05, ROOM.h, ROOM.z1 - ROOM.z0, ROOM.x0, ROOM.h / 2, 0, wallMat);
@@ -388,8 +388,8 @@ for (const [dx, dz] of [[-0.46, -0.26], [0.46, -0.26], [-0.46, 0.26], [0.46, 0.2
 box(0.45, 0.4, 0.35, 2.05, 0.2, 1.0, obstacleMat);                        // crate
 cyl(0.065, 0.86, 1.25, 0.43, 0.32, obstacleMat); cyl(0.065, 0.86, 1.25, 0.43, 0.56, obstacleMat);  // a person
 cyl(0.17, 0.62, 1.25, 1.17, 0.44, obstacleMat);
-for (const [dx, dz] of [[-0.2, -0.2], [0.2, -0.2], [-0.2, 0.2], [0.2, 0.2]]) box(0.035, 0.45, 0.035, -0.95 + dx, 0.225, -1.05 + dz, obstacleMat); // chair
-box(0.45, 0.04, 0.45, -0.95, 0.46, -1.05, obstacleMat);
+for (const [dx, dz] of [[-0.2, -0.2], [0.2, -0.2], [-0.2, 0.2], [0.2, 0.2]]) box(0.035, 0.45, 0.035, 0.7 + dx, 0.225, 1.25 + dz, obstacleMat); // chair
+box(0.45, 0.04, 0.45, 0.7, 0.46, 1.25, obstacleMat);
 scene.add(room);
 room.traverse((o) => { if (o.isMesh) o.geometry.computeBoundsTree(); });
 
@@ -927,9 +927,18 @@ new STLLoader().load('meshes/gerdoo/dock.stl', (g) => {
   room.add(holder);
   dockReady = true; dirty = true;
 });
+// the sign head's light box: green when Gerdoo is home, amber when away (dock/dock_light)
+const dockGlow = new THREE.PointLight(0xffa000, 0, 1.1, 1.4);
+dockGlow.position.set(-0.235, 0.40, 0);              // just behind the open back of the light box
+const glowLine = new THREE.Mesh(new THREE.BoxGeometry(0.002, 0.0025, 0.19), new THREE.MeshBasicMaterial({ color: 0xffa000 }));
+glowLine.position.set(-0.1595, 0.3855, 0);           // the diffuser line under GERDOO
+room.add(dockGlow, glowLine);
 function dockState() {
   const chip = $('chip-dock');
   if (!dockReady) return;
+  const homeNow = Math.hypot(pose.x, pose.z) * 1000 < 4 && Math.abs(((pose.yaw * DEG + 540) % 360) - 180) < 3;
+  const c = homeNow ? 0x22ff66 : 0xffa000;
+  dockGlow.color.setHex(c); dockGlow.intensity = homeNow ? 1.6 : 1.2; glowLine.material.color.setHex(c);
   const d = Math.hypot(pose.x, pose.z) * 1000, yaw = Math.abs(((pose.yaw * DEG + 540) % 360) - 180);
   const on = d < 4 && yaw < 3;
   chip.className = on ? 'chip' : 'chip warn';
