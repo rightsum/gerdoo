@@ -102,6 +102,17 @@
     .armcam .rangebar > span:first-child { color: #e8ecf6; font-size: 13.5px; }
     .armcam .stage { margin-top: 10px; }
     .armcam .stage.off { display: none; }
+    .sonar { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .sonar-cell { padding: 10px 12px; border-radius: 12px; background: #070d1c;
+      border: 1px solid rgba(255,255,255,0.07); font-size: 12.5px; color: #8493b3; }
+    .sonar-cell b { display: block; color: #e8ecf6; font-weight: 500; margin-bottom: 4px; }
+    .sonar-val { font-family: ui-monospace, monospace; font-size: 18px; color: #e8ecf6; }
+    .sonar-val.bad { color: #ff5f56; }
+    .sonar-bar { height: 6px; margin-top: 8px; border-radius: 3px; background: rgba(255,255,255,0.07); overflow: hidden; }
+    .joint .sonar-bar { margin-top: 0; }
+    .sonar-bar i { display: block; height: 100%; width: 0; border-radius: 3px; background: #37d67a; transition: width .2s; }
+    .sonar-robot { grid-column: 1 / -1; text-align: center; padding: 8px; font-size: 12px; color: #8493b3;
+      border: 1px dashed rgba(255,255,255,0.12); border-radius: 12px; }
     .locked { padding: 14px 16px; font-size: 13px; color: #ffe0a3;
       background: rgba(255,180,0,0.08); border-top: 1px solid rgba(255,180,0,0.2); }
   </style>
@@ -313,6 +324,66 @@
     </section>
     {% endfor %}
 
+    <!-- ---------------- Wheels + ultrasonic ---------------- -->
+    <section class="panel" id="drive-panel">
+      <div class="panel-head">
+        <h2>Wheels &amp; ultrasonic</h2>
+        <span class="status" id="drive-status"><span class="led"></span><span id="drive-status-text">closed</span></span>
+        <button class="toggle" id="drive-toggle" aria-label="Open wheel and ultrasonic controls"
+                {% if not has_password %}disabled{% endif %}></button>
+      </div>
+      {% if has_password %}
+      <div class="panel-body empty" id="drive-body">
+        <div class="sonar">
+          {% for key, label in [("FL", "Front left"), ("FR", "Front right")] %}
+          <div class="sonar-cell" data-s="{{ key }}"><b>{{ label }}</b>
+            <span class="sonar-val">–</span><div class="sonar-bar"><i></i></div></div>
+          {% endfor %}
+          <div class="sonar-robot">▲ front · robot · back ▼</div>
+          {% for key, label in [("BL", "Back left"), ("BR", "Back right")] %}
+          <div class="sonar-cell" data-s="{{ key }}"><b>{{ label }}</b>
+            <span class="sonar-val">–</span><div class="sonar-bar"><i></i></div></div>
+          {% endfor %}
+        </div>
+        {% for side, label in [("L", "Left wheel"), ("R", "Right wheel")] %}
+        <div class="joint drive-row" data-side="{{ side }}">
+          <b>{{ label }}</b>
+          <span class="drive-state">–</span>
+          <span class="val drive-enc">–</span>
+        </div>
+        {% endfor %}
+        <div class="joint">
+          <b>Power</b>
+          <input type="range" id="drive-power" min="-30" max="30" step="5" value="15">
+          <span class="val" id="drive-power-val">+15%</span>
+        </div>
+        <div class="joint">
+          <b>Time</b>
+          <input type="range" id="drive-ms" min="200" max="3000" step="100" value="1000">
+          <span class="val" id="drive-ms-val">1.0 s</span>
+        </div>
+        <div class="armbtns">
+          <button class="go" id="drive-run-L">Run left</button>
+          <button class="go" id="drive-run-R">Run right</button>
+        </div>
+        <div class="armbtns">
+          <button class="stop" id="drive-stop">STOP</button>
+          <button id="drive-zero">Zero encoders</button>
+        </div>
+        <p class="hint">Wheels off the ground. Each run stops by itself after the
+        time set; STOP cuts both at once, and so does closing this card. The
+        Teensy caps a run at 30% and 3 s. Plus power drives the board's RPWM side:
+        in the first test that turned the left wheel forward and the right one
+        backward. The count on the right of each wheel is its encoder; after a
+        run it shows how far and how fast it went.
+        Ultrasonic: <i>far</i> means nothing within about 4 m, <i>silent</i>
+        means the sensor gave no echo pulse at all (check its power and wires).</p>
+      </div>
+      {% else %}
+      <div class="locked">🔒 Set a control-panel password before using the wheels.</div>
+      {% endif %}
+    </section>
+
     <!-- ---------------- Arm cameras ---------------- -->
     <section class="panel" id="armcam-panel">
       <div class="panel-head">
@@ -415,6 +486,73 @@
           two is what you actually hear — which is why a single control looked
           like it worked and did nothing.
         </div>
+      </div>
+    </section>
+
+    <!-- ---------------- Reactor screen ---------------- -->
+    <section class="panel" id="reactor-panel">
+      <div class="panel-head">
+        <h2>Reactor screen</h2>
+        <span class="status" id="reactor-status"><span class="led"></span><span id="reactor-status-text">—</span></span>
+      </div>
+      <div class="panel-body">
+        <div class="armbtns">
+          <button class="reactor-look" data-look="auto">Auto</button>
+          <button class="reactor-look" data-look="idle">Idle</button>
+          <button class="reactor-look" data-look="listening">Listening</button>
+          <button class="reactor-look" data-look="thinking">Thinking</button>
+        </div>
+        <div class="armbtns">
+          <button class="reactor-look" data-look="speaking">Speaking</button>
+          <button class="reactor-look" data-look="charging">Charging</button>
+          <button class="reactor-look" data-look="low">Low power</button>
+          <button class="reactor-look" data-look="boot">Boot</button>
+        </div>
+        <p class="hint"><b>Auto</b> follows the robot: listening, thinking and speaking
+        during a conversation, low power under 15% battery, idle otherwise. Any other
+        button holds that look on the heart screen until you press Auto again.
+        Charging only shows from here for now: the robot can't yet tell when it's
+        charging.</p>
+      </div>
+    </section>
+
+    <!-- ---------------- Light ---------------- -->
+    <section class="panel" id="light-panel">
+      <div class="panel-head">
+        <h2>Light</h2>
+        <span class="status" id="light-status"><span class="led"></span><span id="light-status-text">—</span></span>
+      </div>
+      <div class="panel-body">
+        <div class="armbtns">
+          <button id="light-auto">Follow light sensor</button>
+          <button id="light-off">Off</button>
+          <button id="light-full">Full</button>
+        </div>
+        <div class="joint">
+          <b>Brightness</b>
+          <input type="range" id="light-level" min="0" max="100" step="5" value="0">
+          <span class="val" id="light-level-val">–</span>
+        </div>
+        <div class="joint">
+          <b>Light sensor</b>
+          <div class="sonar-bar"><i id="light-sensor-bar"></i></div>
+          <span class="val" id="light-sensor-val">–</span>
+        </div>
+        <div class="joint">
+          <b>Strip now</b>
+          <div class="sonar-bar"><i id="light-duty-bar"></i></div>
+          <span class="val" id="light-duty-val">–</span>
+        </div>
+        <div class="armbtns">
+          <button id="light-cal-dark">Set dark (cover sensor)</button>
+          <button id="light-cal-bright">Set bright (room lit)</button>
+        </div>
+        <p class="hint"><b>Follow light sensor</b>: the darker the room, the brighter
+        the strip. Cover the sensor with your hand and it should fade up within a
+        couple of seconds; uncover it and it fades down. Moving the slider (or Off /
+        Full) switches to a fixed brightness. <b>Set dark / Set bright</b> record
+        the sensor's reading now as the two ends of its range: cover it for dark,
+        normal room light for bright. They last until the Teensy restarts.</p>
       </div>
     </section>
 
@@ -882,6 +1020,122 @@
       });
     });
 
+    // ---- Wheels + ultrasonic ----
+    // Polls the Teensy's DRIVE line 4 times a second while open. A run is timed
+    // and stopped by the firmware; the card only notices it ending, then shows
+    // the encoder's change over the run.
+    (() => {
+      const toggle = document.getElementById('drive-toggle');
+      const body   = document.getElementById('drive-body');
+      const status = document.getElementById('drive-status');
+      const text   = document.getElementById('drive-status-text');
+      const power  = document.getElementById('drive-power');
+      const powerV = document.getElementById('drive-power-val');
+      const ms     = document.getElementById('drive-ms');
+      const msV    = document.getElementById('drive-ms-val');
+      if (!toggle || !body) return;
+      const rows = {};
+      document.querySelectorAll('.drive-row').forEach((r) => { rows[r.dataset.side] = r; });
+      const cells = {};
+      document.querySelectorAll('.sonar-cell').forEach((c) => { cells[c.dataset.s] = c; });
+      const runs = {};          // side -> {enc0, t0} while a run is in progress
+      let open = false, poll = null, last = null;
+
+      function paintSonar(s) {
+        Object.entries(s || {}).forEach(([key, r]) => {
+          const cell = cells[key];
+          if (!cell) return;
+          const val = cell.querySelector('.sonar-val'), bar = cell.querySelector('.sonar-bar i');
+          val.classList.toggle('bad', r.state === 'silent');
+          if (r.state === 'ok') {
+            val.textContent = r.cm.toFixed(1) + ' cm';
+            bar.style.width = Math.max(4, Math.min(100, 100 - r.cm / 2)) + '%';   // full at 0, empty past 2 m
+            bar.style.background = r.cm < 20 ? '#ff5f56' : r.cm < 50 ? '#ffb400' : '#37d67a';
+          } else {
+            val.textContent = r.state;
+            bar.style.width = '0';
+          }
+        });
+      }
+
+      function paintMotors(m) {
+        let any = false;
+        ['L', 'R'].forEach((side) => {
+          const s = (m || {})[side], row = rows[side];
+          if (!s || !row) return;
+          any = any || s.running;
+          row.querySelector('.drive-enc').textContent = s.enc;
+          const state = row.querySelector('.drive-state');
+          if (s.running) {
+            if (runs[side]) runs[side].seen = true;
+            state.textContent = 'running ' + (s.duty > 0 ? '+' : '') + s.duty + '%';
+          } else if (runs[side] && runs[side].seen) {   // a poll from before the click doesn't end it
+            const d = s.enc - runs[side].enc0, secs = (Date.now() - runs[side].t0) / 1000;
+            state.textContent = `last run: ${d > 0 ? '+' : ''}${d} counts, ~${Math.round(Math.abs(d) / secs)}/s`;
+            delete runs[side];
+          } else if (state.textContent === '–') {
+            state.textContent = 'idle';
+          }
+        });
+        status.classList.remove('err');
+        status.classList.toggle('on', any);
+        text.textContent = any ? 'running' : 'ready';
+      }
+
+      async function refresh() {
+        try {
+          last = await api('/api/drive');
+          paintSonar(last.sonar);
+          paintMotors(last.motors);
+        } catch (e) {
+          text.textContent = 'error';
+          status.classList.add('err');
+        }
+      }
+
+      async function stopAll(quiet) {
+        try { await api('/api/drive/stop', 'POST'); if (!quiet) showToast('Motors stopped'); }
+        catch (e) { showToast(e.message); }
+      }
+
+      async function run(side) {
+        const pct = Number(power.value);
+        if (!pct) { showToast('Power is 0'); return; }
+        runs[side] = { enc0: last ? last.motors[side].enc : 0, t0: Date.now() };
+        try { await api('/api/drive/run', 'POST', { side, percent: pct, ms: Number(ms.value) }); }
+        catch (e) { delete runs[side]; showToast(e.message); }
+        refresh();
+      }
+
+      power.addEventListener('input', () => {
+        powerV.textContent = (power.value > 0 ? '+' : '') + power.value + '%';
+      });
+      ms.addEventListener('input', () => { msV.textContent = (ms.value / 1000).toFixed(1) + ' s'; });
+      document.getElementById('drive-run-L').addEventListener('click', () => run('L'));
+      document.getElementById('drive-run-R').addEventListener('click', () => run('R'));
+      document.getElementById('drive-stop').addEventListener('click', () => stopAll(false));
+      document.getElementById('drive-zero').addEventListener('click', async () => {
+        try { await api('/api/drive/zero', 'POST'); showToast('Encoders zeroed'); }
+        catch (e) { showToast(e.message); }
+        refresh();
+      });
+
+      toggle.addEventListener('click', () => {
+        open = !open;
+        toggle.classList.toggle('on', open);
+        body.classList.toggle('empty', !open);
+        if (open) {
+          refresh();
+          poll = setInterval(refresh, 250);
+        } else {
+          clearInterval(poll);
+          stopAll(true);
+          status.classList.remove('on', 'err');
+          text.textContent = 'closed';
+        }
+      });
+    })();
+
     // ---- LiDAR ----
     const lidarToggle = document.getElementById('lidar-toggle');
     const lidarBody   = document.getElementById('lidar-body');
@@ -1091,6 +1345,97 @@
 
     refreshVolume();
     setInterval(refreshVolume, 15000);
+
+
+    // ---- Reactor screen ----
+    // Session tier, like the light. The highlighted button is the mode; the status
+    // shows what the screen program is drawing right now (Auto resolves to a look).
+    (() => {
+      const status = document.getElementById('reactor-status');
+      const text = document.getElementById('reactor-status-text');
+      const buttons = [...document.querySelectorAll('.reactor-look')];
+
+      function paint(s) {
+        buttons.forEach((b) => b.classList.toggle('go', b.dataset.look === s.mode));
+        status.classList.toggle('on', !!s.running);
+        status.classList.toggle('err', !s.running);
+        text.textContent = !s.running ? 'screen program not running'
+          : 'showing ' + s.look + (s.mode === 'auto' ? ' (auto)' : '');
+      }
+
+      async function refresh() {
+        try { paint(await api('/api/reactor')); }
+        catch { text.textContent = 'unavailable'; status.classList.add('err'); }
+      }
+
+      buttons.forEach((b) => b.addEventListener('click', async () => {
+        try { await api('/api/reactor', 'POST', { look: b.dataset.look }); }
+        catch (e) { showToast(e.message); }
+        refresh();
+      }));
+
+      refresh();
+      setInterval(refresh, 2000);
+    })();
+
+
+    // ---- Light ----
+    // Session tier, like the speaker. Polled once a second so covering the
+    // sensor shows up on the bars while you watch the strip.
+    (() => {
+      const status = document.getElementById('light-status');
+      const text   = document.getElementById('light-status-text');
+      const level  = document.getElementById('light-level');
+      const levelV = document.getElementById('light-level-val');
+      const autoB  = document.getElementById('light-auto');
+      let dragging = false;
+
+      function paint(s) {
+        const auto = s.mode === 'auto';
+        autoB.classList.toggle('go', auto);
+        status.classList.remove('err');
+        status.classList.toggle('on', s.duty > 0);
+        text.textContent = auto ? 'following sensor' : 'fixed';
+        const sens = Math.round(s.sensor * 100), duty = Math.round(s.duty * 100 / s.duty_max);
+        document.getElementById('light-sensor-bar').style.width = sens + '%';
+        document.getElementById('light-sensor-val').textContent = sens + '% · ' + s.sensor_raw;
+        document.getElementById('light-duty-bar').style.width = duty + '%';
+        document.getElementById('light-duty-val').textContent = duty + '%';
+        if (!dragging) {
+          if (auto) { levelV.textContent = 'auto'; }
+          else if (s.level != null) { level.value = Math.round(s.level * 100); levelV.textContent = level.value + '%'; }
+        }
+      }
+
+      async function refresh() {
+        try { paint(await api('/api/light')); }
+        catch { text.textContent = 'unavailable'; status.classList.add('err'); }
+      }
+
+      async function set(body, msg) {
+        try { await api('/api/light', 'POST', body); if (msg) showToast(msg); }
+        catch (e) { showToast(e.message); }
+        refresh();
+      }
+
+      level.addEventListener('input', () => { dragging = true; levelV.textContent = level.value + '%'; });
+      level.addEventListener('change', async () => { await set({ level: Number(level.value) }); dragging = false; });
+      autoB.addEventListener('click', () => set({ mode: 'auto' }, 'Following the light sensor'));
+      document.getElementById('light-off').addEventListener('click', () => set({ level: 0 }, 'Light off'));
+      document.getElementById('light-full').addEventListener('click', () => set({ level: 100 }, 'Light full'));
+      ['dark', 'bright'].forEach((which) => {
+        document.getElementById('light-cal-' + which).addEventListener('click', async () => {
+          try {
+            const r = await api('/api/light/calibrate', 'POST', { which });
+            showToast(`${which === 'dark' ? 'Dark' : 'Bright'} end set to ${r.raw}`);
+          } catch (e) { showToast(e.message); }
+          refresh();
+        });
+      });
+
+      refresh();
+      setInterval(refresh, 1000);
+    })();
 
 
     // ---- Neck Servos ----

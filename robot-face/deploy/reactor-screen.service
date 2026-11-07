@@ -1,0 +1,14 @@
+[Unit]
+Description=Reactor screen (the 1.69" LCD heart in the front cover, SPI on the 40-pin header)
+
+# Needs jetson-io's spi1 overlay plus pins 29/31/32 out of tristate (inventory.md, 1.69"
+# LCD section; log 047). Without them it runs but the panel shows static or nothing.
+
+[Service]
+WorkingDirectory=%h/robot-face
+ExecStart=/usr/bin/python3 %h/robot-face/reactor_screen.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target

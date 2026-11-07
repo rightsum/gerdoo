@@ -34,7 +34,10 @@ def main():
     fd = os.open(ports[0], os.O_RDWR | os.O_NOCTTY)
     tty.setraw(fd)
     termios.tcflush(fd, termios.TCIFLUSH)
-    os.write(fd, (cmd + "\n").encode())
+    # The leading newline ends any half line already in the Teensy's buffer: right after a
+    # reboot the port can echo for a moment before setraw, bouncing heartbeat text back in
+    # (2026-10-30: "BUS SCAN 7" arrived as "HEARTBEAT seq=23 upti...BUS SCAN 7").
+    os.write(fd, ("\n" + cmd + "\n").encode())
 
     buf = b""
     end = time.time() + secs

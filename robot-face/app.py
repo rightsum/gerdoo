@@ -1041,6 +1041,143 @@ def api_arm_move(name):
     return jsonify(ok=True, joint=joint, pos=pos)
 
 
+# ---- Reactor screen (the 1.69" LCD in the front cover; reactor_screen.py draws it) ----
+# Session tier, like the light. "auto" follows the voice state and the battery; any other
+# look is held until set back to auto. reactor_screen.py reads "reactor" from state.json.
+REACTOR_LOOKS = ("auto", "idle", "listening", "thinking", "speaking", "charging", "low", "boot")
+REACTOR_STATUS_FILE = "/tmp/reactor_status.json"
+
+
+@app.route("/api/reactor")
+def api_reactor_get():
+    try:
+        with open(REACTOR_STATUS_FILE) as f:
+            shown = json.load(f)
+    except (OSError, ValueError):
+        shown = {}
+    running = time.time() - shown.get("updated", 0) < 10
+    return jsonify(mode=load_state().get("reactor", "auto"), running=running,
+                   look=shown.get("look") if running else None, battery=shown.get("battery"))
+
+
+@app.route("/api/reactor", methods=["POST"])
+def api_reactor_set():
+    look = (request.get_json(silent=True) or {}).get("look")
+    if look not in REACTOR_LOOKS:
+        return jsonify(error="look must be one of " + ", ".join(REACTOR_LOOKS)), 400
+    s = load_state()
+    s["reactor"] = look
+    save_state(s)
+    return jsonify(ok=True, mode=look)
+
+
+# ---- Light (COB strip + photoresistor) ----
+# Session tier, like the neck and the speaker: a light is harmless.
+
+@app.route("/api/light")
+def api_light_get():
+    try:
+        state, _ = teensy.light_state()
+    except teensy.TeensyError as e:
+        return jsonify(error=str(e)), 503
+    return jsonify(state)
+
+
+@app.route("/api/light", methods=["POST"])
+def api_light_set():
+    """{"mode": "auto"} follows the light sensor; {"level": 0-100} fixes the brightness."""
+    data = request.get_json(silent=True) or {}
+    if data.get("mode") == "auto":
+        level = None
+    else:
+        try:
+            level = int(data["level"])
+        except (KeyError, TypeError, ValueError):
+            return jsonify(error="body must be {\"mode\": \"auto\"} or {\"level\": 0-100}"), 400
+        if not 0 <= level <= 100:
+            return jsonify(error="level must be 0-100"), 400
+    try:
+        line = teensy.light_set(level)
+    except teensy.TeensyError as e:
+        return jsonify(error=str(e)), 503
+    return jsonify(ok=True, reply=line)
+
+
+@app.route("/api/light/calibrate", methods=["POST"])
+def api_light_calibrate():
+    which = (request.get_json(silent=True) or {}).get("which")
+    if which not in ("dark", "bright"):
+        return jsonify(error="body must be {\"which\": \"dark\"|\"bright\"}"), 400
+    try:
+        raw = teensy.light_calibrate(which)
+    except teensy.TeensyError as e:
+        return jsonify(error=str(e)), 503
+    return jsonify(ok=True, which=which, raw=raw)
+
+
+# ---- Drive motors + ultrasonic sensors (auth + password required: the wheels move) ----
+# Bring-up controls (log 046): one motor at a time, timed runs the firmware
+# stops by itself, capped at 30 % and 3 s there as well as here.
+DRIVE_SIDES = ("L", "R")
+
+
+@app.route("/api/drive")
+def api_drive_state():
+    refusal = sensor_guard()
+    if refusal:
+        return refusal
+    try:
+        state, _ = teensy.drive_state()
+    except teensy.TeensyError as e:
+        return jsonify(error=str(e)), 503
+    return jsonify(state)
+
+
+@app.route("/api/drive/run", methods=["POST"])
+def api_drive_run():
+    refusal = sensor_guard()
+    if refusal:
+        return refusal
+    data = request.get_json(silent=True) or {}
+    try:
+        side, percent, ms = data["side"], int(data["percent"]), int(data["ms"])
+    except (KeyError, TypeError, ValueError):
+        return jsonify(error="body must be {\"side\": \"L\"|\"R\", \"percent\": -30..30, \"ms\": 100-3000}"), 400
+    if side not in DRIVE_SIDES or percent == 0 or not -30 <= percent <= 30 or not 100 <= ms <= 3000:
+        return jsonify(error="side L or R, percent -30..30 (not 0), ms 100-3000"), 400
+    try:
+        line = teensy.motor_run(side, percent, ms)
+    except teensy.TeensyError as e:
+        return jsonify(error=str(e)), 503
+    if " start " not in line:
+        return jsonify(error=line), 409
+    return jsonify(ok=True, reply=line)
+
+
+@app.route("/api/drive/stop", methods=["POST"])
+def api_drive_stop():
+    refusal = sensor_guard()
+    if refusal:
+        return refusal
+    try:
+        teensy.motor_stop()
+    except teensy.TeensyError as e:
+        return jsonify(error=str(e)), 503
+    return jsonify(ok=True)
+
+
+@app.route("/api/drive/zero", methods=["POST"])
+def api_drive_zero():
+    refusal = sensor_guard()
+    if refusal:
+        return refusal
+    try:
+        teensy.encoders_zero()
+    except teensy.TeensyError as e:
+        return jsonify(error=str(e)), 503
+    return jsonify(ok=True)
+
+
 # ---- Speaker volume ----
 
 @app.route("/api/audio")

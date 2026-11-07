@@ -6,7 +6,7 @@
 
 struct Arm {
   char side;          // 'L' or 'R'
-  uint8_t firstId;    // L = 1..8, R = 11..18
+  uint8_t firstId;    // L = 11..18, R = 1..8 (relabelled 2026-11-06)
   bool torque;        // as last read back from the servos
   uint16_t speed;     // goal speed, steps/s
   uint16_t strength;  // torque limit, 0-1000 (1000 = the servo's full torque)
