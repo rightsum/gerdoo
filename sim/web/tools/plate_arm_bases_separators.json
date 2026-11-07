@@ -1,0 +1,118 @@
+{
+ "name": "gerdoo arm bases + 1st-2nd separators v2",
+ "process": {
+  "name": "Gerdoo arm bases v2 0.16 HQ - grid supports, PETG interface, prime tower",
+  "wall_loops": "5",
+  "sparse_infill_density": "40%",
+  "support_threshold_angle": "40",
+  "support_type": "normal(manual)",
+  "support_style": "grid",
+  "support_base_pattern": "rectilinear",
+  "support_base_pattern_spacing": "2",
+  "support_interface_speed": "40",
+  "enable_prime_tower": "1",
+  "prime_tower_width": "35",
+  "prime_tower_rib_wall": "0",
+  "prime_tower_brim_width": "3",
+  "wipe_tower_x": [
+   "205"
+  ],
+  "wipe_tower_y": [
+   "8"
+  ]
+ },
+ "objects": [
+  {
+   "name": "arm base L",
+   "stl": "<export dir>/arm_base_L_draft.stl",
+   "map": "x,-z,y",
+   "at": [
+    66,
+    162
+   ],
+   "enforcers": [
+    [
+     -193,
+     -84,
+     28.0,
+     31.0,
+     -60,
+     37
+    ]
+   ]
+  },
+  {
+   "name": "arm base R",
+   "stl": "<export dir>/arm_base_R_draft.stl",
+   "map": "x,-z,y",
+   "at": [
+    190,
+    162
+   ],
+   "enforcers": [
+    [
+     84,
+     193,
+     28.0,
+     31.0,
+     -60,
+     37
+    ]
+   ]
+  },
+  {
+   "name": "separator hex 77 #1",
+   "stl": "<export dir>/separator_0.stl",
+   "map": "x,-z,y",
+   "at": [
+    48,
+    64
+   ]
+  },
+  {
+   "name": "separator hex 77 #2",
+   "stl": "<export dir>/separator_0.stl",
+   "map": "x,-z,y",
+   "at": [
+    80,
+    64
+   ]
+  },
+  {
+   "name": "separator hex 77 #3",
+   "stl": "<export dir>/separator_0.stl",
+   "map": "x,-z,y",
+   "at": [
+    112,
+    64
+   ]
+  },
+  {
+   "name": "separator hex 77 #4",
+   "stl": "<export dir>/separator_0.stl",
+   "map": "x,-z,y",
+   "at": [
+    144,
+    64
+   ]
+  },
+  {
+   "name": "separator round 80 #1",
+   "stl": "<export dir>/round_post_80.stl",
+   "map": "x,-z,y",
+   "at": [
+    176,
+    64
+   ]
+  },
+  {
+   "name": "separator round 80 #2",
+   "stl": "<export dir>/round_post_80.stl",
+   "map": "x,-z,y",
+   "at": [
+    208,
+    64
+   ]
+  }
+ ]
+}

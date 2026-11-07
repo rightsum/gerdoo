@@ -1,0 +1,85 @@
+{
+ "name": "gerdoo base-board holders v4 (side walls on the battery screws, extension grid, servo tower, Teensy washers) - all screwed",
+ "process": {
+  "name": "Gerdoo base-board holders 0.16 HQ - PLA, PETG interface under the tower ears, prime tower",
+  "support_type": "normal(manual)",
+  "support_style": "grid",
+  "brim_type": "outer_only",
+  "brim_width": "4",
+  "enable_prime_tower": "1",
+  "prime_tower_width": "35",
+  "prime_tower_rib_wall": "0",
+  "prime_tower_brim_width": "3",
+  "wipe_tower_x": [
+   "210"
+  ],
+  "wipe_tower_y": [
+   "150"
+  ]
+ },
+ "objects": [
+  {
+   "name": "side wall robot-left (+x)",
+   "stl": "<export dir>/bb_wall_left.stl",
+   "map": "x,-z,y",
+   "at": [
+    28,
+    128
+   ]
+  },
+  {
+   "name": "side wall robot-right (-x)",
+   "stl": "<export dir>/bb_wall_right.stl",
+   "map": "x,-z,y",
+   "at": [
+    80,
+    128
+   ]
+  },
+  {
+   "name": "servo tower (ears supported, PETG interface)",
+   "stl": "<export dir>/bb_servo_tower.stl",
+   "map": "x,-z,y",
+   "at": [
+    170,
+    60
+   ],
+   "enforcers": [
+    [
+     15.0,
+     22.0,
+     0,
+     7.0,
+     95.3,
+     102.3
+    ],
+    [
+     -22.0,
+     -15.0,
+     0,
+     7.0,
+     95.3,
+     102.3
+    ]
+   ]
+  },
+  {
+   "name": "Teensy washer 1",
+   "stl": "<export dir>/bb_washer_a.stl",
+   "map": "x,-z,y",
+   "at": [
+    150,
+    100
+   ]
+  },
+  {
+   "name": "Teensy washer 2",
+   "stl": "<export dir>/bb_washer_b.stl",
+   "map": "x,-z,y",
+   "at": [
+    165,
+    100
+   ]
+  }
+ ]
+}

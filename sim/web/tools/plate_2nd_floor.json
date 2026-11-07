@@ -1,0 +1,72 @@
+{
+ "name": "gerdoo 2nd floor v2 + 2nd-3rd separators + hub spacers",
+ "process": {
+  "name": "Gerdoo 2nd floor + separators 0.16 HQ - PLA, no supports",
+  "enable_support": "0"
+ },
+ "objects": [
+  {
+   "name": "2nd-floor-v2",
+   "stl": "<export dir>/2nd_floor_v2.stl",
+   "map": "x,-z,y",
+   "at": [
+    128,
+    128
+   ]
+  },
+  {
+   "name": "hub rear spacer 1",
+   "stl": "<export dir>/hub_rear_spacer.stl",
+   "map": "x,-z,y",
+   "at": [
+    12,
+    240
+   ]
+  },
+  {
+   "name": "hub rear spacer 2",
+   "stl": "<export dir>/hub_rear_spacer.stl",
+   "map": "x,-z,y",
+   "at": [
+    24,
+    240
+   ]
+  },
+  {
+   "name": "2nd-3rd separator 1 (hex 74)",
+   "stl": "<export dir>/separator_2nd_short_74.stl",
+   "map": "x,-z,y",
+   "at": [
+    16,
+    104
+   ]
+  },
+  {
+   "name": "2nd-3rd separator 2 (hex 74)",
+   "stl": "<export dir>/separator_2nd_short_74.stl",
+   "map": "x,-z,y",
+   "at": [
+    16,
+    152
+   ]
+  },
+  {
+   "name": "2nd-3rd separator 3 (hex 74)",
+   "stl": "<export dir>/separator_2nd_short_74.stl",
+   "map": "x,-z,y",
+   "at": [
+    240,
+    104
+   ]
+  },
+  {
+   "name": "2nd-3rd separator 4 (hex 74)",
+   "stl": "<export dir>/separator_2nd_short_74.stl",
+   "map": "x,-z,y",
+   "at": [
+    240,
+    152
+   ]
+  }
+ ]
+}

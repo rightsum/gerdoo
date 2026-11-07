@@ -1,0 +1,18 @@
+{
+ "name": "gerdoo gold ring inlay",
+ "process": {
+  "name": "Gerdoo inlay 0.16 HQ - PLA (load the gold filament)",
+  "enable_support": "0"
+ },
+ "objects": [
+  {
+   "name": "gold ring inlay",
+   "stl": "<export dir>/gold_ring.stl",
+   "map": "x,y,z",
+   "at": [
+    128,
+    128
+   ]
+  }
+ ]
+}

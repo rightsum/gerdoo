@@ -1,0 +1,81 @@
+{
+ "name": "gerdoo motor bracket shims",
+ "process": {
+  "name": "Gerdoo shims 0.16 HQ - PLA (solid from shells)",
+  "enable_support": "0"
+ },
+ "objects": [
+  {
+   "name": "motor bracket shim 0.68 mm (L)",
+   "stl": "<export dir>/motor_shim_0.68.stl",
+   "map": "x,-z,y",
+   "at": [
+    50,
+    90
+   ]
+  },
+  {
+   "name": "motor bracket shim 0.68 mm (R)",
+   "stl": "<export dir>/motor_shim_0.68.stl",
+   "map": "x,-z,y",
+   "at": [
+    50,
+    150
+   ]
+  },
+  {
+   "name": "motor bracket shim 1.00 mm (L)",
+   "stl": "<export dir>/motor_shim_1.00.stl",
+   "map": "x,-z,y",
+   "at": [
+    102,
+    90
+   ]
+  },
+  {
+   "name": "motor bracket shim 1.00 mm (R)",
+   "stl": "<export dir>/motor_shim_1.00.stl",
+   "map": "x,-z,y",
+   "at": [
+    102,
+    150
+   ]
+  },
+  {
+   "name": "motor bracket shim 1.48 mm (L)",
+   "stl": "<export dir>/motor_shim_1.48.stl",
+   "map": "x,-z,y",
+   "at": [
+    154,
+    90
+   ]
+  },
+  {
+   "name": "motor bracket shim 1.48 mm (R)",
+   "stl": "<export dir>/motor_shim_1.48.stl",
+   "map": "x,-z,y",
+   "at": [
+    154,
+    150
+   ]
+  },
+  {
+   "name": "motor bracket shim 1.96 mm (L)",
+   "stl": "<export dir>/motor_shim_1.96.stl",
+   "map": "x,-z,y",
+   "at": [
+    206,
+    90
+   ]
+  },
+  {
+   "name": "motor bracket shim 1.96 mm (R)",
+   "stl": "<export dir>/motor_shim_1.96.stl",
+   "map": "x,-z,y",
+   "at": [
+    206,
+    150
+   ]
+  }
+ ]
+}

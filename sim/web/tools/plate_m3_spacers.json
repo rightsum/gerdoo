@@ -1,0 +1,127 @@
+{
+ "name": "gerdoo M3 threaded hex spacers x12 (5.2 AF x 7, M3x0.5 +0.1, 0.08 layers)",
+ "process": {
+  "name": "Gerdoo threaded spacers 0.08 mm layers - PLA, 4 walls, slow outer wall, brim",
+  "enable_support": "0",
+  "layer_height": "0.08",
+  "wall_loops": "4",
+  "outer_wall_speed": [
+   "60"
+  ],
+  "inner_wall_speed": [
+   "80"
+  ],
+  "brim_type": "outer_only",
+  "brim_width": "3"
+ },
+ "objects": [
+  {
+   "name": "M3 threaded hex spacer 01",
+   "stl": "<export dir>/m3_hex_spacer_threaded_5.2x7.stl",
+   "map": "x,y,z",
+   "at": [
+    98,
+    108
+   ]
+  },
+  {
+   "name": "M3 threaded hex spacer 02",
+   "stl": "<export dir>/m3_hex_spacer_threaded_5.2x7.stl",
+   "map": "x,y,z",
+   "at": [
+    118,
+    108
+   ]
+  },
+  {
+   "name": "M3 threaded hex spacer 03",
+   "stl": "<export dir>/m3_hex_spacer_threaded_5.2x7.stl",
+   "map": "x,y,z",
+   "at": [
+    138,
+    108
+   ]
+  },
+  {
+   "name": "M3 threaded hex spacer 04",
+   "stl": "<export dir>/m3_hex_spacer_threaded_5.2x7.stl",
+   "map": "x,y,z",
+   "at": [
+    158,
+    108
+   ]
+  },
+  {
+   "name": "M3 threaded hex spacer 05",
+   "stl": "<export dir>/m3_hex_spacer_threaded_5.2x7.stl",
+   "map": "x,y,z",
+   "at": [
+    98,
+    128
+   ]
+  },
+  {
+   "name": "M3 threaded hex spacer 06",
+   "stl": "<export dir>/m3_hex_spacer_threaded_5.2x7.stl",
+   "map": "x,y,z",
+   "at": [
+    118,
+    128
+   ]
+  },
+  {
+   "name": "M3 threaded hex spacer 07",
+   "stl": "<export dir>/m3_hex_spacer_threaded_5.2x7.stl",
+   "map": "x,y,z",
+   "at": [
+    138,
+    128
+   ]
+  },
+  {
+   "name": "M3 threaded hex spacer 08",
+   "stl": "<export dir>/m3_hex_spacer_threaded_5.2x7.stl",
+   "map": "x,y,z",
+   "at": [
+    158,
+    128
+   ]
+  },
+  {
+   "name": "M3 threaded hex spacer 09",
+   "stl": "<export dir>/m3_hex_spacer_threaded_5.2x7.stl",
+   "map": "x,y,z",
+   "at": [
+    98,
+    148
+   ]
+  },
+  {
+   "name": "M3 threaded hex spacer 10",
+   "stl": "<export dir>/m3_hex_spacer_threaded_5.2x7.stl",
+   "map": "x,y,z",
+   "at": [
+    118,
+    148
+   ]
+  },
+  {
+   "name": "M3 threaded hex spacer 11",
+   "stl": "<export dir>/m3_hex_spacer_threaded_5.2x7.stl",
+   "map": "x,y,z",
+   "at": [
+    138,
+    148
+   ]
+  },
+  {
+   "name": "M3 threaded hex spacer 12",
+   "stl": "<export dir>/m3_hex_spacer_threaded_5.2x7.stl",
+   "map": "x,y,z",
+   "at": [
+    158,
+    148
+   ]
+  }
+ ]
+}

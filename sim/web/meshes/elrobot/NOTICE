@@ -1,0 +1,3 @@
+ElRobot follower meshes and URDF (meshes/elrobot/, tools/elrobot_follower.urdf)
+from norma-core: https://github.com/norma-core/norma-core/tree/main/hardware/elrobot
+Licensed under the Apache License 2.0 (see LICENSE in this folder). Unmodified copies.

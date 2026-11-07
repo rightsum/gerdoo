@@ -1,0 +1,15 @@
+{
+ "name": "gerdoo antenna bracket, back (one piece)",
+ "process": {
+  "name": "Gerdoo antenna bracket 0.16 HQ - PLA, no supports",
+  "enable_support": "0"
+ },
+ "objects": [
+  {
+   "name": "antenna bracket, back (one piece)",
+   "stl": "<export dir>/antenna_bracket_back.stl",
+   "map": "x,-z,y",
+   "at": [128, 128]
+  }
+ ]
+}
