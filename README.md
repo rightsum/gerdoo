@@ -4,7 +4,11 @@
 
 *Gerdoo* (گردو) means walnut in Persian. Small thing, hard shell, a lot inside. The name felt right.
 
-![Gerdoo, mid-build](docs/images/gerdoo-wip.jpg)
+<p>
+  <img src="docs/images/gerdoo-wip.jpg" alt="Gerdoo, mid-build" width="49%">
+  <img src="docs/images/gerdoo-wip-2.jpg" alt="Gerdoo with both arms, the 2nd floor and the head on, November 2026" width="49%">
+</p>
+
 *Gerdoo, mid-build. A work in progress, like this README.*
 
 ## Why I'm building this
