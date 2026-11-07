@@ -62,6 +62,7 @@
 #include <std_msgs/msg/bool.h>
 
 #include <Servo.h>  // Neck pan/tilt servos (SG90)
+#include "drive_types.h"  // drive motors; encoders on the RT1062's hardware decoders
 
 // ---------------------------------------------------------------------------
 // Transport override: move micro-ROS from Serial to SerialUSB1.
@@ -102,7 +103,7 @@ size_t arduino_transport_read(struct uxrCustomTransport * transport,
 
 // ---------------------------------------------------------------------------
 
-const char *FW_VERSION = "microros-0.4.0";
+const char *FW_VERSION = "microros-0.5.1";
 const int LED_PIN = 13;
 const uint32_t HEARTBEAT_MS = 1000;
 
@@ -116,6 +117,9 @@ const int ADC_MAX = 4095;  // 12-bit
 
 // Cached readings (updated every heartbeat, published when agent is up).
 float batteryMainV = 0.0;
+float powerPackV = 0.0;        // from the servos, see readPackVoltage()
+uint8_t powerPackId = 0;
+uint32_t lastPackRead = 0;
 int   batteryMainRaw = 0;
 
 // --- COB LED strip via D4184 MOSFET module (pin 4) ---
@@ -439,6 +443,9 @@ void sendBattery() {
   Serial.print("BATTERY main_v=");    Serial.print(batteryMainV, 3);
   Serial.print(" raw=");              Serial.print(batteryMainRaw);
   Serial.print(" pin_v=");            Serial.print((float)batteryMainRaw * ADC_REF / ADC_MAX, 3);
+  Serial.print(" pack_v=");           Serial.print(powerPackV, 1);
+  Serial.print(" pack_from_id=");     Serial.print(powerPackId);
+  Serial.print(" source=");           Serial.print(batteryMainV > 0 && batteryMainV == powerPackV ? "servo" : "a0");
   Serial.println();
 }
 
@@ -451,6 +458,7 @@ void sendLight() {
   Serial.print("/");               Serial.print(STRIP_DUTY_MAX);
   Serial.print(" (cap of ");       Serial.print(STRIP_MAX);  Serial.print(")");
   Serial.print(" mode=");          Serial.print(stripManual >= 0.0 ? "manual" : "auto");
+  Serial.print(" level=");         Serial.print(stripManual, 2);   // manual level 0..1, -1 in auto
   Serial.println();
 }
 
@@ -742,7 +750,10 @@ const uint32_t ARM_WATCH_MS = 200;
 const int      RANGE_EEPROM_BASE = 256;        // 8 bytes per servo ID
 uint32_t armLastWatch = 0;
 
-Arm arms[2] = {{'L', 1, false, 400, 300, 0}, {'R', 11, false, 400, 300, 0}};
+// 2026-11-06: the arm with servos 1-8 is mounted on the robot's right and 11-18 on
+// its left, so the sides are relabelled here. Joint limits are stored per servo ID,
+// and calibration offsets live in the servos, so both follow their arm unchanged.
+Arm arms[2] = {{'L', 11, false, 400, 300, 0}, {'R', 1, false, 400, 300, 0}};
 
 Arm *armBySide(char c) {
   if (c == 'L') return &arms[0];
@@ -796,6 +807,28 @@ HardwareSerial *armBus() {
     busOpened[ARM_PORT] = true;
   }
   return s;
+}
+
+// The power pack's voltage, as measured by the servos it feeds (register 62, 0.1 V steps).
+// Fallback for the A0 voltage sensor: batteryMainV uses A0 when it reads a real voltage and
+// this otherwise (log 055: on 2026-11-05 the sensor's input got no 12 V; it was rewired to the
+// motor pack on 11-06, log 056). The neck servos are asked first: they are idle most of the
+// time, so their reading is the least sagged. 0 when no servo answers.
+const uint8_t STS_REG_VOLT = 62;
+const uint8_t PACK_VOLT_IDS[] = {21, 22, 1, 11};
+const uint32_t PACK_READ_MS = 5000;
+void readPackVoltage() {
+  HardwareSerial &s = *armBus();
+  for (uint8_t id : PACK_VOLT_IDS) {
+    uint8_t v;
+    if (busReadBytes(s, id, STS_REG_VOLT, 1, &v) && v > 0) {
+      powerPackV = v / 10.0;
+      powerPackId = id;
+      return;
+    }
+  }
+  powerPackV = 0.0;
+  powerPackId = 0;
 }
 
 bool busWrite(HardwareSerial &s, uint8_t id, const uint8_t *params, uint8_t np) {
@@ -1296,6 +1329,246 @@ void armCommand(Arm &a, const char *rest) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Drive motors, encoders and ultrasonic sensors — bring-up test (log 046)
+// ---------------------------------------------------------------------------
+// Two IBT-2 (BTS7960) bridges and the 36GP-555 Hall encoders, on the pins in
+// the inventory's pin map. R_EN and L_EN are joined on each board and held low
+// by a 10 k pull-down, so a bridge stays off until its EN pin is driven high.
+//
+// These are test limits, not driving limits: duty is capped at
+// DRIVE_TEST_MAX_PCT, and every run stops by itself within DRIVE_TEST_MAX_MS.
+// Run them with the wheels off the ground.
+
+QuadEncoder encLeft(1, 30, 31, 1);    // hardware channel 1, 22 k pull-ups
+QuadEncoder encRight(2, 0, 1, 1);     // channel 2; Serial1 is free since the lidar moved to USB
+
+Drive drives[2] = {
+  {"L", 5, 6, 7, encLeft, false, 0, 0, 0, 0, 0},
+  {"R", 22, 23, 21, encRight, false, 0, 0, 0, 0, 0},
+};
+
+const int      DRIVE_PWM_HZ = 20000;      // inaudible, under the BTS7960's 25 kHz limit
+const int      DRIVE_TEST_MAX_PCT = 30;
+const uint32_t DRIVE_TEST_MAX_MS = 3000;
+const int      DRIVE_RAMP_PER_MS = 4;     // 12-bit counts: 0 -> 30 % in about 0.3 s
+uint32_t lastDriveUpdate = 0;
+uint32_t encWatchUntil = 0, lastEncWatch = 0;
+
+// Called first in setup(). With the pull-downs fitted this is belt and braces;
+// without them it is the only thing holding the bridges off.
+void driveSafePins() {
+  for (Drive &d : drives) {
+    pinMode(d.en, OUTPUT);    digitalWrite(d.en, LOW);
+    pinMode(d.rpwm, OUTPUT);  digitalWrite(d.rpwm, LOW);
+    pinMode(d.lpwm, OUTPUT);  digitalWrite(d.lpwm, LOW);
+  }
+}
+
+void driveSetup() {
+  for (Drive &d : drives) {
+    analogWriteFrequency(d.rpwm, DRIVE_PWM_HZ);
+    analogWriteFrequency(d.lpwm, DRIVE_PWM_HZ);
+    analogWrite(d.rpwm, 0);
+    analogWrite(d.lpwm, 0);
+    d.enc.setInitConfig();
+    d.enc.EncConfig.filterCount = 5;          // ignore glitches shorter than about 1 us
+    d.enc.EncConfig.filterSamplePeriod = 20;  // (motor PWM noise); real edges are 100s of us apart
+    d.enc.init();
+  }
+}
+
+// Never both PWM pins high: that would brake the motor through the high sides.
+void driveApply(Drive &d) {
+  analogWrite(d.rpwm, d.duty > 0 ? d.duty : 0);
+  analogWrite(d.lpwm, d.duty < 0 ? -d.duty : 0);
+}
+
+void driveStop(Drive &d, const char *why) {
+  bool was = d.running;
+  d.running = false;
+  d.targetDuty = d.duty = 0;
+  driveApply(d);
+  digitalWrite(d.en, LOW);
+  if (!was) return;
+  Serial.print("MOTOR ");         Serial.print(d.name);
+  Serial.print(" stopped=");      Serial.print(why);
+  Serial.print(" ran_ms=");       Serial.print(millis() - d.startedAt);
+  Serial.print(" enc_delta=");    Serial.println(d.enc.read() - d.encAtStart);
+}
+
+void driveStart(Drive &d, int pct, int ms) {
+  if (pct == 0 || abs(pct) > DRIVE_TEST_MAX_PCT || ms <= 0 || ms > (int)DRIVE_TEST_MAX_MS) {
+    Serial.print("MOTOR ERR range: percent -");  Serial.print(DRIVE_TEST_MAX_PCT);
+    Serial.print("..");                          Serial.print(DRIVE_TEST_MAX_PCT);
+    Serial.print(" (not 0), ms 1..");            Serial.println(DRIVE_TEST_MAX_MS);
+    return;
+  }
+  driveStop(d, "replaced");
+  d.targetDuty = pct * 4095 / 100;
+  d.encAtStart = d.enc.read();
+  d.startedAt = millis();
+  d.stopAt = d.startedAt + ms;
+  d.running = true;
+  digitalWrite(d.en, HIGH);
+  Serial.print("MOTOR ");       Serial.print(d.name);
+  Serial.print(" start percent=");  Serial.print(pct);
+  Serial.print(" ms=");         Serial.println(ms);
+}
+
+void driveUpdate() {
+  uint32_t now = millis();
+  if (now == lastDriveUpdate) return;
+  int step = DRIVE_RAMP_PER_MS * (int)(now - lastDriveUpdate);
+  lastDriveUpdate = now;
+  for (Drive &d : drives) {
+    if (!d.running) continue;
+    if ((int32_t)(now - d.stopAt) >= 0) { driveStop(d, "time"); continue; }
+    int next = d.duty < d.targetDuty ? min(d.duty + step, d.targetDuty)
+                                     : max(d.duty - step, d.targetDuty);
+    if (next != d.duty) { d.duty = next; driveApply(d); }
+  }
+}
+
+void sendEnc() {
+  Serial.print("ENC L=");  Serial.print(encLeft.read());
+  Serial.print(" R=");     Serial.println(encRight.read());
+}
+
+// --- Ultrasonic: 4 x HC-SR04P, fired one at a time ---
+// One sensor per 60 ms slot: no cross-talk between them, and it is the
+// HC-SR04's own minimum cycle. A full sweep takes 240 ms.
+const uint8_t SONAR_N = 4;
+const char *const SONAR_NAME[SONAR_N] = {"FL", "FR", "BL", "BR"};
+const uint8_t SONAR_TRIG[SONAR_N] = {33, 35, 37, 39};
+const uint8_t SONAR_ECHO[SONAR_N] = {34, 36, 38, 40};
+const uint32_t SONAR_SLOT_MS = 60;
+const uint32_t SONAR_MAX_ECHO_US = 25000;   // about 4.3 m; longer means nothing came back
+enum SonarState : uint8_t { SONAR_NONE, SONAR_OK, SONAR_FAR, SONAR_SILENT };
+volatile uint32_t sonarRiseUs[SONAR_N], sonarFallUs[SONAR_N];
+volatile uint8_t sonarEdges[SONAR_N];       // bit 0 = rose, bit 1 = fell
+float sonarCm[SONAR_N];
+SonarState sonarState[SONAR_N];
+uint8_t sonarIdx = 0;
+uint32_t sonarSlotStart = 0;
+uint32_t sonarWatchUntil = 0, lastSonarWatch = 0;
+
+void sonarEdge(uint8_t i) {
+  uint32_t t = micros();
+  if (digitalReadFast(SONAR_ECHO[i])) { sonarRiseUs[i] = t; sonarEdges[i] |= 1; }
+  else if (sonarEdges[i] & 1)         { sonarFallUs[i] = t; sonarEdges[i] |= 2; }
+}
+void sonarIsr0() { sonarEdge(0); }
+void sonarIsr1() { sonarEdge(1); }
+void sonarIsr2() { sonarEdge(2); }
+void sonarIsr3() { sonarEdge(3); }
+void (*const SONAR_ISR[SONAR_N])() = {sonarIsr0, sonarIsr1, sonarIsr2, sonarIsr3};
+
+void sonarSetup() {
+  for (uint8_t i = 0; i < SONAR_N; i++) {
+    pinMode(SONAR_TRIG[i], OUTPUT);
+    digitalWrite(SONAR_TRIG[i], LOW);
+    pinMode(SONAR_ECHO[i], INPUT_PULLDOWN);   // an unpowered or missing sensor reads "silent", not noise
+    attachInterrupt(digitalPinToInterrupt(SONAR_ECHO[i]), SONAR_ISR[i], CHANGE);
+  }
+}
+
+void sonarUpdate() {
+  uint32_t now = millis();
+  if (sonarSlotStart && now - sonarSlotStart < SONAR_SLOT_MS) return;
+  if (sonarSlotStart) {                       // close the slot that just ended
+    uint8_t i = sonarIdx;
+    noInterrupts();
+    uint8_t e = sonarEdges[i];
+    uint32_t w = sonarFallUs[i] - sonarRiseUs[i];
+    interrupts();
+    if (!(e & 1))                              { sonarState[i] = SONAR_SILENT; sonarCm[i] = -1; }
+    else if (!(e & 2) || w > SONAR_MAX_ECHO_US) { sonarState[i] = SONAR_FAR;   sonarCm[i] = -1; }
+    else                                       { sonarState[i] = SONAR_OK;    sonarCm[i] = w / 58.0f; }
+    sonarIdx = (sonarIdx + 1) % SONAR_N;
+  }
+  uint8_t i = sonarIdx;                        // fire the next one
+  sonarEdges[i] = 0;
+  digitalWriteFast(SONAR_TRIG[i], HIGH);
+  delayMicroseconds(10);
+  digitalWriteFast(SONAR_TRIG[i], LOW);
+  sonarSlotStart = now ? now : 1;
+}
+
+void sendSonar() {
+  Serial.print("SONAR");
+  for (uint8_t i = 0; i < SONAR_N; i++) {
+    Serial.print(' ');  Serial.print(SONAR_NAME[i]);  Serial.print('=');
+    switch (sonarState[i]) {
+      case SONAR_OK:     Serial.print(sonarCm[i], 1);  Serial.print("cm");  break;
+      case SONAR_FAR:    Serial.print("far");     break;    // pulse but no return in range
+      case SONAR_SILENT: Serial.print("silent");  break;    // no echo pulse at all: power, TRIG or ECHO wiring
+      default:           Serial.print("--");      break;
+    }
+  }
+  Serial.println();
+}
+
+// One line with everything the control panel's Drive card shows, so a poll is
+// a single round trip. sonar: centimetres, or -1 far, -2 silent, -3 not read yet.
+void sendDrive() {
+  Serial.print("DRIVE run=");  Serial.print(drives[0].running);  Serial.print(',');  Serial.print(drives[1].running);
+  Serial.print(" duty=");      Serial.print(drives[0].duty * 100 / 4095);  Serial.print(',');  Serial.print(drives[1].duty * 100 / 4095);
+  Serial.print(" enc=");       Serial.print(encLeft.read());  Serial.print(',');  Serial.print(encRight.read());
+  Serial.print(" sonar=");
+  for (uint8_t i = 0; i < SONAR_N; i++) {
+    if (i) Serial.print(',');
+    switch (sonarState[i]) {
+      case SONAR_OK:     Serial.print(sonarCm[i], 1);  break;
+      case SONAR_FAR:    Serial.print(-1);  break;
+      case SONAR_SILENT: Serial.print(-2);  break;
+      default:           Serial.print(-3);  break;
+    }
+  }
+  Serial.println();
+}
+
+void sendIo() {
+  Serial.print("IO en_L(7)=");    Serial.print(digitalRead(7));
+  Serial.print(" en_R(21)=");     Serial.print(digitalRead(21));
+  for (uint8_t i = 0; i < SONAR_N; i++) {
+    Serial.print(" echo_");  Serial.print(SONAR_NAME[i]);
+    Serial.print('(');       Serial.print(SONAR_ECHO[i]);  Serial.print(")=");
+    Serial.print(digitalRead(SONAR_ECHO[i]));
+  }
+  Serial.print(" enc_L=");  Serial.print(encLeft.read());
+  Serial.print(" enc_R=");  Serial.println(encRight.read());
+}
+
+void driveWatchUpdate() {
+  uint32_t now = millis();
+  if (encWatchUntil && now - lastEncWatch >= 250) {
+    lastEncWatch = now;
+    sendEnc();
+    if ((int32_t)(now - encWatchUntil) >= 0) encWatchUntil = 0;
+  }
+  if (sonarWatchUntil && now - lastSonarWatch >= 250) {
+    lastSonarWatch = now;
+    sendSonar();
+    if ((int32_t)(now - sonarWatchUntil) >= 0) sonarWatchUntil = 0;
+  }
+}
+
+void motorCommand(const char *rest) {
+  if (strcmp(rest, "STOP") == 0) {
+    for (Drive &d : drives) driveStop(d, "command");
+    Serial.println("MOTOR stopped");
+    return;
+  }
+  char side = 0;
+  int pct = 0, ms = 1000;
+  if (sscanf(rest, "%c %d %d", &side, &pct, &ms) < 2 || (side != 'L' && side != 'R')) {
+    Serial.println("MOTOR usage: MOTOR <L|R> <percent -30..30> [ms <= 3000] | MOTOR STOP");
+    return;
+  }
+  driveStart(drives[side == 'L' ? 0 : 1], pct, ms);
+}
+
 void handleCommand(char *cmd) {
   size_t n = strlen(cmd);
   while (n > 0 && (cmd[n - 1] == '\r' || cmd[n - 1] == ' ')) cmd[--n] = '\0';
@@ -1380,7 +1653,42 @@ void handleCommand(char *cmd) {
     int from = -1, to = -1;
     sscanf(cmd + 10, "%d %d", &from, &to);
     busSetId(7, from, to);
+  } else if (strcmp(cmd, "MOTOR") == 0 || strncmp(cmd, "MOTOR ", 6) == 0) {
+    motorCommand(cmd[5] ? cmd + 6 : "");
+  } else if (strcmp(cmd, "ENC") == 0) {
+    sendEnc();
+  } else if (strcmp(cmd, "ENC ZERO") == 0) {
+    encLeft.write(0);
+    encRight.write(0);
+    sendEnc();
+  } else if (strncmp(cmd, "ENC WATCH ", 10) == 0) {
+    encWatchUntil = millis() + constrain(atoi(cmd + 10), 1, 60) * 1000UL;
+  } else if (strcmp(cmd, "SONAR") == 0) {
+    sendSonar();
+  } else if (strncmp(cmd, "SONAR WATCH ", 12) == 0) {
+    sonarWatchUntil = millis() + constrain(atoi(cmd + 12), 1, 60) * 1000UL;
+  } else if (strcmp(cmd, "IO") == 0) {
+    sendIo();
+  } else if (strcmp(cmd, "DRIVE") == 0) {
+    sendDrive();
+  } else if (strncmp(cmd, "PINTEST ", 8) == 0) {
+    // Tell an open wire from a dead source without opening the robot: read an analog pin
+    // with the internal pull-up, then pull-down, then neither. Open: ~4095 / ~0 / anything.
+    // Tied to the voltage sensor's 7.5 k leg with no input: the pull-up only reaches ~0.8 V.
+    // Shorted to GND: 0 / 0 / 0. Only analog pins that carry nothing else are allowed.
+    int pin = atoi(cmd + 8);
+    if (pin != 14 && !(pin >= 16 && pin <= 27)) {
+      Serial.println("PINTEST ERR only pin 14 or 16-27");
     } else {
+      pinMode(pin, INPUT_PULLUP);   delay(20); int up = analogRead(pin);
+      pinMode(pin, INPUT_PULLDOWN); delay(20); int down = analogRead(pin);
+      pinMode(pin, INPUT_DISABLE);  delay(20); int plain = analogRead(pin);
+      Serial.print("PINTEST pin=");  Serial.print(pin);
+      Serial.print(" pullup=");      Serial.print(up);
+      Serial.print(" pulldown=");    Serial.print(down);
+      Serial.print(" plain=");       Serial.println(plain);
+    }
+  } else {
     Serial.print("ERR unknown_command ");  Serial.println(cmd);
   }
 }
@@ -1404,6 +1712,7 @@ void pollConsole() {
 // ---------------------------------------------------------------------------
 
 void setup() {
+  driveSafePins();                      // bridges off before anything else runs
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, LOW);
   armLoadRanges();                      // joint limits, kept in EEPROM (log 028)
@@ -1421,6 +1730,9 @@ void setup() {
   analogWriteFrequency(LED_STRIP_PIN, STRIP_PWM_HZ);
   pinMode(LED_STRIP_PIN, OUTPUT);
   analogWrite(LED_STRIP_PIN, 0);
+
+  driveSetup();                // drive PWM at 20 kHz, encoders on the hardware decoders
+  sonarSetup();
 
   // Neck servos
   servoPan.attach(SERVO_PAN_PIN);
@@ -1450,6 +1762,9 @@ void setup() {
 void loop() {
   loopCount++;
   armWatchdog();
+  driveUpdate();
+  sonarUpdate();
+  driveWatchUpdate();
 
   // --- Smooth servo motion: time-based, speed-limited, 50 Hz ---
   uint32_t nowMs = millis();
@@ -1553,7 +1868,12 @@ void loop() {
     // Read main battery voltage (every heartbeat, regardless of agent state).
     batteryMainRaw = analogRead(BATTERY_MAIN_PIN);
     float pinV = (float)batteryMainRaw * ADC_REF / ADC_MAX;
-    batteryMainV = pinV * BATTERY_DIVIDER;
+    if (now - lastPackRead >= PACK_READ_MS) {
+      lastPackRead = now;
+      readPackVoltage();
+    }
+    // The A0 sensor when it reads a real pack; otherwise the servos' own reading.
+    batteryMainV = pinV * BATTERY_DIVIDER > 3.0 ? pinV * BATTERY_DIVIDER : powerPackV;
 
     if (agentState == AGENT_CONNECTED) {
       msg_heartbeat.data     = (int32_t)heartbeatSeq;

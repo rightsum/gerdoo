@@ -1,0 +1,21 @@
+{
+ "name": "gerdoo display retainer v13 (ears joined to the frame)",
+ "process": {
+  "name": "Gerdoo display retainer 0.16 HQ - PLA, flat, no supports",
+  "enable_support": "0",
+  "brim_type": "no_brim",
+  "sparse_infill_density": "100%",
+  "sparse_infill_pattern": "zig-zag"
+ },
+ "objects": [
+  {
+   "name": "display retainer (flat)",
+   "stl": "<export dir>/display_retainer_v13.stl",
+   "map": "x,y,z",
+   "at": [
+    128,
+    128
+   ]
+  }
+ ]
+}

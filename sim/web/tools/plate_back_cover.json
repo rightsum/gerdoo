@@ -1,0 +1,60 @@
+{
+ "name": "gerdoo back cover v10 (recessed arrows, wider sides, standing, snap-off fins) + display retainer + LDR cradle v7",
+ "process": {
+  "name": "Gerdoo covers 0.16 HQ - standing, PLA, no supports, fins + brim, gentle (tall thin walls)",
+  "enable_support": "0",
+  "brim_type": "outer_only",
+  "brim_width": "8",
+  "travel_acceleration": [
+   "3000"
+  ],
+  "default_acceleration": [
+   "2500"
+  ],
+  "inner_wall_speed": [
+   "100"
+  ],
+  "travel_speed": [
+   "400"
+  ],
+  "reduce_crossing_wall": "1",
+  "z_hop": [
+   "0.8"
+  ],
+  "z_hop_types": [
+   "Spiral Lift"
+  ]
+ },
+ "objects": [
+  {
+   "name": "back cover v11 (standing, wider, square ends) + fins",
+   "stl": [
+    "<export dir>/back_cover_v11.stl",
+    "<export dir>/fins_back.stl"
+   ],
+   "map": "z,x,y",
+   "at": [
+    75,
+    128
+   ]
+  },
+  {
+   "name": "display retainer",
+   "stl": "<export dir>/display_retainer_v13.stl",
+   "map": "x,y,z",
+   "at": [
+    185,
+    75
+   ]
+  },
+  {
+   "name": "LDR cradle v7",
+   "stl": "<export dir>/ldr_cradle_v7.stl",
+   "map": "x,-z,y",
+   "at": [
+    185,
+    170
+   ]
+  }
+ ]
+}

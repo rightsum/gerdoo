@@ -1,0 +1,89 @@
+{
+ "name": "gerdoo neck v1 (pan base, clamp, arm, head yoke on its back) + lidar holder v2",
+ "process": {
+  "name": "Gerdoo neck + lidar holder 0.16 HQ - PLA, PETG interface under the yoke pad, prime tower, 5 walls, 40% infill",
+  "enable_support": "1",
+  "wall_loops": "5",
+  "sparse_infill_density": "40%",
+  "brim_type": "outer_only",
+  "brim_width": "4",
+  "travel_acceleration": [
+   "3000"
+  ],
+  "z_hop": [
+   "0.8"
+  ],
+  "z_hop_types": [
+   "Spiral Lift"
+  ],
+  "support_type": "normal(manual)",
+  "support_style": "grid",
+  "enable_prime_tower": "1",
+  "prime_tower_width": "35",
+  "prime_tower_rib_wall": "0",
+  "prime_tower_brim_width": "3",
+  "wipe_tower_x": [
+   "205"
+  ],
+  "wipe_tower_y": [
+   "95"
+  ]
+ },
+ "objects": [
+  {
+   "name": "lidar holder v2 (plate down, post up)",
+   "stl": "<export dir>/lidar_holder_v2.stl",
+   "map": "x,-z,y",
+   "at": [
+    62,
+    62
+   ]
+  },
+  {
+   "name": "neck pan base (floor down)",
+   "stl": "<export dir>/neck_pan_base.stl",
+   "map": "x,-z,y",
+   "at": [
+    150,
+    62
+   ]
+  },
+  {
+   "name": "neck head yoke (on its back; support + PETG interface under the pad)",
+   "stl": "<export dir>/neck_head_yoke.stl",
+   "map": "x,y,z",
+   "at": [
+    150,
+    140
+   ],
+   "enforcers": [
+    [
+     -18.5,
+     18.0,
+     255.0,
+     278.5,
+     82.0,
+     89.6
+    ]
+   ]
+  },
+  {
+   "name": "neck arm (on its side, +z up)",
+   "stl": "<export dir>/neck_arm.stl",
+   "map": "x,y,z",
+   "at": [
+    62,
+    150
+   ]
+  },
+  {
+   "name": "neck pan clamp (flipped)",
+   "stl": "<export dir>/neck_pan_clamp.stl",
+   "map": "x,z,-y",
+   "at": [
+    106,
+    200
+   ]
+  }
+ ]
+}

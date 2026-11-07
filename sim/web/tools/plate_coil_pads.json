@@ -1,0 +1,118 @@
+{
+ "name": "gerdoo coil pad inlays (silk)",
+ "process": {
+  "name": "Gerdoo inlay 0.16 HQ - PLA (load the tri-colour silk)",
+  "enable_support": "0",
+  "brim_type": "no_brim"
+ },
+ "objects": [
+  {
+   "name": "coil pad 01",
+   "stl": "<export dir>/pad_01.stl",
+   "map": "x,y,z",
+   "at": [
+    98,
+    103
+   ]
+  },
+  {
+   "name": "coil pad 02",
+   "stl": "<export dir>/pad_02.stl",
+   "map": "x,y,z",
+   "at": [
+    113,
+    103
+   ]
+  },
+  {
+   "name": "coil pad 03",
+   "stl": "<export dir>/pad_03.stl",
+   "map": "x,y,z",
+   "at": [
+    128,
+    103
+   ]
+  },
+  {
+   "name": "coil pad 04",
+   "stl": "<export dir>/pad_04.stl",
+   "map": "x,y,z",
+   "at": [
+    143,
+    103
+   ]
+  },
+  {
+   "name": "coil pad 05",
+   "stl": "<export dir>/pad_05.stl",
+   "map": "x,y,z",
+   "at": [
+    98,
+    119
+   ]
+  },
+  {
+   "name": "coil pad 06",
+   "stl": "<export dir>/pad_06.stl",
+   "map": "x,y,z",
+   "at": [
+    113,
+    119
+   ]
+  },
+  {
+   "name": "coil pad 07",
+   "stl": "<export dir>/pad_07.stl",
+   "map": "x,y,z",
+   "at": [
+    128,
+    119
+   ]
+  },
+  {
+   "name": "coil pad 08",
+   "stl": "<export dir>/pad_08.stl",
+   "map": "x,y,z",
+   "at": [
+    143,
+    119
+   ]
+  },
+  {
+   "name": "coil pad 09",
+   "stl": "<export dir>/pad_09.stl",
+   "map": "x,y,z",
+   "at": [
+    98,
+    135
+   ]
+  },
+  {
+   "name": "coil pad 10",
+   "stl": "<export dir>/pad_10.stl",
+   "map": "x,y,z",
+   "at": [
+    113,
+    135
+   ]
+  },
+  {
+   "name": "coil pad 11",
+   "stl": "<export dir>/pad_11.stl",
+   "map": "x,y,z",
+   "at": [
+    128,
+    135
+   ]
+  },
+  {
+   "name": "coil pad 12",
+   "stl": "<export dir>/pad_12.stl",
+   "map": "x,y,z",
+   "at": [
+    143,
+    135
+   ]
+  }
+ ]
+}

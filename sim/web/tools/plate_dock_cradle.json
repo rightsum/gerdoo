@@ -1,0 +1,57 @@
+{
+ "name": "gerdoo dock cradle v14 (upside down: top on the plate, cavity open upwards; no stop pads, no supports)",
+ "process": {
+  "name": "Gerdoo dock cradle 0.20 - PLA lightning infill, 3 walls, no supports",
+  "sparse_infill_density": "12%",
+  "brim_type": "no_brim",
+  "enable_prime_tower": "0",
+  "layer_height": "0.2",
+  "initial_layer_print_height": "0.2",
+  "wall_loops": "3",
+  "top_shell_layers": "5",
+  "bottom_shell_layers": "4",
+  "default_acceleration": [
+   "6000"
+  ],
+  "inner_wall_speed": [
+   "300"
+  ],
+  "internal_solid_infill_speed": [
+   "250"
+  ],
+  "outer_wall_acceleration": [
+   "5000"
+  ],
+  "outer_wall_speed": [
+   "200"
+  ],
+  "overhang_1_4_speed": [
+   "0"
+  ],
+  "overhang_2_4_speed": [
+   "50"
+  ],
+  "overhang_3_4_speed": [
+   "30"
+  ],
+  "sparse_infill_speed": [
+   "270"
+  ],
+  "top_surface_speed": [
+   "200"
+  ],
+  "sparse_infill_pattern": "lightning",
+  "enable_support": "0"
+ },
+ "objects": [
+  {
+   "name": "dock cradle v14 (upside down)",
+   "stl": "<export dir>/dock_cradle_v14.stl",
+   "map": "x,z,-y",
+   "at": [
+    128,
+    100
+   ]
+  }
+ ]
+}

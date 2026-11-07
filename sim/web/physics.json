@@ -1,0 +1,390 @@
+{
+ "body_mass_g": 4547,
+ "body_cog_mm": [
+  1.2,
+  0.3,
+  131.1
+ ],
+ "poses": {
+  "rest": {
+   "mass_g": 5641,
+   "cog_mm": [
+    20.8,
+    -0.0,
+    160.5
+   ],
+   "min_edge_margin_mm": 58.8,
+   "a_limit_g": {
+    "brake (tip forward)": 0.43,
+    "accelerate (tip back)": 0.69,
+    "turn left (tip right)": 0.7,
+    "turn right (tip left)": 0.7
+   },
+   "servo_torque_Nm": {
+    "L": {
+     "j2": 0.55,
+     "j3": 0.55,
+     "j4": 0.43,
+     "j6": 0.12
+    },
+    "R": {
+     "j2": 0.55,
+     "j3": 0.55,
+     "j4": 0.43,
+     "j6": 0.12
+    }
+   }
+  },
+  "rest+250g": {
+   "mass_g": 6141,
+   "cog_mm": [
+    44.6,
+    -0.4,
+    173.5
+   ],
+   "min_edge_margin_mm": 38.4,
+   "a_limit_g": {
+    "brake (tip forward)": 0.26,
+    "accelerate (tip back)": 0.77,
+    "turn left (tip right)": 0.42,
+    "turn right (tip left)": 0.43
+   },
+   "servo_torque_Nm": {
+    "L": {
+     "j2": 1.32,
+     "j3": 1.32,
+     "j4": 1.11,
+     "j6": 0.49
+    },
+    "R": {
+     "j2": 1.32,
+     "j3": 1.32,
+     "j4": 1.11,
+     "j6": 0.49
+    }
+   }
+  },
+  "reach": {
+   "mass_g": 5641,
+   "cog_mm": [
+    31.3,
+    -0.1,
+    156.7
+   ],
+   "min_edge_margin_mm": 49.8,
+   "a_limit_g": {
+    "brake (tip forward)": 0.37,
+    "accelerate (tip back)": 0.77,
+    "turn left (tip right)": 0.6,
+    "turn right (tip left)": 0.61
+   },
+   "servo_torque_Nm": {
+    "L": {
+     "j2": 0.84,
+     "j3": 0.58,
+     "j4": 0.42,
+     "j6": 0.12
+    },
+    "R": {
+     "j2": 0.84,
+     "j3": 0.58,
+     "j4": 0.42,
+     "j6": 0.12
+    }
+   }
+  },
+  "reach+250g": {
+   "mass_g": 6141,
+   "cog_mm": [
+    60.0,
+    -0.6,
+    168.3
+   ],
+   "min_edge_margin_mm": 25.2,
+   "a_limit_g": {
+    "brake (tip forward)": 0.18,
+    "accelerate (tip back)": 0.89,
+    "turn left (tip right)": 0.28,
+    "turn right (tip left)": 0.29
+   },
+   "servo_torque_Nm": {
+    "L": {
+     "j2": 1.79,
+     "j3": 1.37,
+     "j4": 1.1,
+     "j6": 0.49
+    },
+    "R": {
+     "j2": 1.79,
+     "j3": 1.37,
+     "j4": 1.1,
+     "j6": 0.49
+    }
+   }
+  },
+  "up": {
+   "mass_g": 5641,
+   "cog_mm": [
+    1.0,
+    -0.3,
+    177.1
+   ],
+   "min_edge_margin_mm": 75.5,
+   "a_limit_g": {
+    "brake (tip forward)": 0.5,
+    "accelerate (tip back)": 0.51,
+    "turn left (tip right)": 0.81,
+    "turn right (tip left)": 0.82
+   },
+   "servo_torque_Nm": {
+    "L": {
+     "j2": 0.0,
+     "j3": 0.04,
+     "j4": 0.06,
+     "j6": 0.02
+    },
+    "R": {
+     "j2": 0.0,
+     "j3": 0.04,
+     "j4": 0.06,
+     "j6": 0.02
+    }
+   }
+  },
+  "up+250g": {
+   "mass_g": 6141,
+   "cog_mm": [
+    1.2,
+    -1.0,
+    212.1
+   ],
+   "min_edge_margin_mm": 75.0,
+   "a_limit_g": {
+    "brake (tip forward)": 0.42,
+    "accelerate (tip back)": 0.43,
+    "turn left (tip right)": 0.67,
+    "turn right (tip left)": 0.68
+   },
+   "servo_torque_Nm": {
+    "L": {
+     "j2": 0.01,
+     "j3": 0.07,
+     "j4": 0.1,
+     "j6": 0.07
+    },
+    "R": {
+     "j2": 0.01,
+     "j3": 0.07,
+     "j4": 0.1,
+     "j6": 0.08
+    }
+   }
+  },
+  "low": {
+   "mass_g": 5641,
+   "cog_mm": [
+    24.8,
+    0.2,
+    140.0
+   ],
+   "min_edge_margin_mm": 55.4,
+   "a_limit_g": {
+    "brake (tip forward)": 0.47,
+    "accelerate (tip back)": 0.82,
+    "turn left (tip right)": 0.76,
+    "turn right (tip left)": 0.75
+   },
+   "servo_torque_Nm": {
+    "L": {
+     "j2": 0.66,
+     "j3": 0.44,
+     "j4": 0.27,
+     "j6": 0.06
+    },
+    "R": {
+     "j2": 0.66,
+     "j3": 0.44,
+     "j4": 0.27,
+     "j6": 0.06
+    }
+   }
+  },
+  "low+250g": {
+   "mass_g": 6141,
+   "cog_mm": [
+    44.3,
+    0.1,
+    131.5
+   ],
+   "min_edge_margin_mm": 38.8,
+   "a_limit_g": {
+    "brake (tip forward)": 0.35,
+    "accelerate (tip back)": 1.02,
+    "turn left (tip right)": 0.56,
+    "turn right (tip left)": 0.56
+   },
+   "servo_torque_Nm": {
+    "L": {
+     "j2": 1.31,
+     "j3": 0.97,
+     "j4": 0.66,
+     "j6": 0.24
+    },
+    "R": {
+     "j2": 1.31,
+     "j3": 0.96,
+     "j4": 0.66,
+     "j6": 0.24
+    }
+   }
+  },
+  "meet": {
+   "mass_g": 5641,
+   "cog_mm": [
+    14.1,
+    0.1,
+    155.0
+   ],
+   "min_edge_margin_mm": 64.5,
+   "a_limit_g": {
+    "brake (tip forward)": 0.49,
+    "accelerate (tip back)": 0.67,
+    "turn left (tip right)": 0.79,
+    "turn right (tip left)": 0.79
+   },
+   "servo_torque_Nm": {
+    "L": {
+     "j2": 0.39,
+     "j3": 0.54,
+     "j4": 0.39,
+     "j6": 0.11
+    },
+    "R": {
+     "j2": 0.39,
+     "j3": 0.54,
+     "j4": 0.39,
+     "j6": 0.11
+    }
+   }
+  },
+  "meet+250g": {
+   "mass_g": 6141,
+   "cog_mm": [
+    32.1,
+    -0.1,
+    167.5
+   ],
+   "min_edge_margin_mm": 49.2,
+   "a_limit_g": {
+    "brake (tip forward)": 0.35,
+    "accelerate (tip back)": 0.73,
+    "turn left (tip right)": 0.56,
+    "turn right (tip left)": 0.56
+   },
+   "servo_torque_Nm": {
+    "L": {
+     "j2": 1.03,
+     "j3": 1.27,
+     "j4": 1.0,
+     "j6": 0.43
+    },
+    "R": {
+     "j2": 1.03,
+     "j3": 1.27,
+     "j4": 1.0,
+     "j6": 0.43
+    }
+   }
+  },
+  "side": {
+   "mass_g": 5641,
+   "cog_mm": [
+    11.3,
+    15.4,
+    158.7
+   ],
+   "min_edge_margin_mm": 58.8,
+   "a_limit_g": {
+    "brake (tip forward)": 0.44,
+    "accelerate (tip back)": 0.58,
+    "turn left (tip right)": 0.9,
+    "turn right (tip left)": 0.71
+   },
+   "servo_torque_Nm": {
+    "L": {
+     "j2": 0.84,
+     "j3": 0.58,
+     "j4": 0.42,
+     "j6": 0.12
+    },
+    "R": {
+     "j2": 0.55,
+     "j3": 0.55,
+     "j4": 0.43,
+     "j6": 0.12
+    }
+   }
+  },
+  "side+250g": {
+   "mass_g": 5891,
+   "cog_mm": [
+    11.4,
+    37.2,
+    164.7
+   ],
+   "min_edge_margin_mm": 47.3,
+   "a_limit_g": {
+    "brake (tip forward)": 0.34,
+    "accelerate (tip back)": 0.48,
+    "turn left (tip right)": 1.0,
+    "turn right (tip left)": 0.55
+   },
+   "servo_torque_Nm": {
+    "L": {
+     "j2": 1.78,
+     "j3": 1.37,
+     "j4": 1.1,
+     "j6": 0.49
+    },
+    "R": {
+     "j2": 1.32,
+     "j3": 1.32,
+     "j4": 1.11,
+     "j6": 0.49
+    }
+   }
+  }
+ },
+ "brake_by_caster_state": {
+  "rest": {
+   "pivots": 0.43,
+   "after forward": 0.37,
+   "after reverse": 0.49
+  },
+  "rest+250g": {
+   "pivots": 0.26,
+   "after forward": 0.2,
+   "after reverse": 0.32
+  },
+  "reach": {
+   "pivots": 0.37,
+   "after forward": 0.31,
+   "after reverse": 0.44
+  },
+  "reach+250g": {
+   "pivots": 0.18,
+   "after forward": 0.12,
+   "after reverse": 0.23
+  },
+  "low": {
+   "pivots": 0.47,
+   "after forward": 0.39,
+   "after reverse": 0.54
+  },
+  "low+250g": {
+   "pivots": 0.35,
+   "after forward": 0.27,
+   "after reverse": 0.42
+  }
+ }
+}

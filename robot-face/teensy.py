@@ -77,7 +77,9 @@ def send(cmd, expect, timeout=TIMEOUT_S):
             # answer. This is the line whose absence caused the stale readings.
             termios.tcflush(fd, termios.TCIFLUSH)
 
-            os.write(fd, (cmd + "\n").encode())
+            # A leading newline ends any half line left in the Teensy's buffer (an echo while
+            # the port opens can leave one), so the command arrives on a line of its own.
+            os.write(fd, ("\n" + cmd + "\n").encode())
             termios.tcdrain(fd)
 
             deadline = time.time() + timeout
@@ -233,3 +235,122 @@ def arm_calibrate(side, joint, mid, half_span):
 def arm_move(side, joint, pos):
     """Returns the firmware's reply; it ends in " ok" only if the write landed."""
     return _arm(side, f"MOVE {int(joint)} {int(pos)}", "MOVE ")
+
+
+# ---- Light: the COB strip, following the photoresistor or set by hand ----
+
+_LIGHT = re.compile(r"^LIGHT raw=(\d+) norm=([\d.]+) cal_dark=(\d+) cal_bright=(\d+) "
+                    r"duty=(\d+)/(\d+).* mode=(auto|manual)(?: level=(-?[\d.]+))?")
+
+
+def parse_light(line):
+    """
+    "LIGHT raw=3022 norm=1.000 cal_dark=529 cal_bright=1400 duty=38/4095
+    (cap of 4095) mode=auto level=-1.00" -> dict. None for anything else.
+
+    sensor is 0 (dark room) .. 1 (bright room) between the two calibration
+    readings; duty is what is on the strip's pin now. level is the manual
+    setting 0..1, None in auto (older firmware does not print it).
+    """
+    m = _LIGHT.match(line or "")
+    if not m:
+        return None
+    raw, norm, dark, bright, duty, duty_max, mode, level = m.groups()
+    lvl = float(level) if level is not None else None
+    return {
+        "sensor_raw": int(raw), "sensor": float(norm),
+        "cal_dark": int(dark), "cal_bright": int(bright),
+        "duty": int(duty), "duty_max": int(duty_max),
+        "mode": mode, "level": lvl if lvl is not None and lvl >= 0 else None,
+    }
+
+
+def light_state():
+    line = send("LIGHT", lambda l: l.startswith("LIGHT raw="))
+    if line is None:
+        raise TeensyError("no reply from the Teensy")
+    return parse_light(line), line
+
+
+def light_set(level):
+    """level 0-100 for a fixed brightness, or None to follow the light sensor."""
+    line = send("STRIP auto" if level is None else f"STRIP {int(level)}",
+                lambda l: l.startswith("STRIP mode="))
+    if line is None:
+        raise TeensyError("no reply from the Teensy")
+    return line
+
+
+def light_calibrate(which):
+    """Record the sensor's reading now as the 'dark' or 'bright' end (until the next reboot)."""
+    line = send(f"CAL {which}", lambda l: l.startswith(f"CAL {which}="))
+    if line is None:
+        raise TeensyError("no reply from the Teensy")
+    return int(line.split("=")[1])
+
+
+# ---- Drive motors and ultrasonic sensors (log 046) ----
+
+_DRIVE_COLS = re.compile(r"\b(run|duty|enc|sonar)=(-?[\d.]+(?:,-?[\d.]+)*)")
+SONAR_NAMES = ("FL", "FR", "BL", "BR")
+_SONAR_CODES = {-1: "far", -2: "silent", -3: "waiting"}
+
+
+def parse_drive_state(line):
+    """
+    "DRIVE run=0,1 duty=0,15 enc=-395,351 sonar=12.8,-1,-2,-3" -> dict.
+
+    None for anything else. Sonar: centimetres, or -1 = nothing in range (far),
+    -2 = no echo pulse at all (power or wiring: silent), -3 = not read yet.
+    Duty is the percentage on the pins now, signed: + is the bridge's RPWM side.
+    """
+    if not (line or "").startswith("DRIVE run="):
+        return None
+    cols = {k: v.split(",") for k, v in _DRIVE_COLS.findall(line)}
+    run, duty, enc = cols.get("run", []), cols.get("duty", []), cols.get("enc", [])
+    motors = {}
+    for i, side in enumerate(("L", "R")):
+        motors[side] = {
+            "running": i < len(run) and run[i] == "1",
+            "duty": int(duty[i]) if i < len(duty) else None,
+            "enc": int(enc[i]) if i < len(enc) else None,
+        }
+    sonar = {}
+    for name, raw in zip(SONAR_NAMES, cols.get("sonar", [])):
+        v = float(raw)
+        sonar[name] = ({"state": "ok", "cm": v} if v >= 0
+                       else {"state": _SONAR_CODES.get(int(v), "waiting"), "cm": None})
+    return {"motors": motors, "sonar": sonar}
+
+
+def drive_state():
+    line = send("DRIVE", lambda l: l.startswith("DRIVE run="))
+    if line is None:
+        raise TeensyError("no reply from the Teensy")
+    return parse_drive_state(line), line
+
+
+def motor_run(side, percent, ms):
+    """
+    One timed run; the firmware stops it by itself after `ms`. It refuses more
+    than 30 % or 3000 ms, which comes back as "MOTOR ERR ...".
+    """
+    line = send(f"MOTOR {side} {int(percent)} {int(ms)}",
+                lambda l: l.startswith(f"MOTOR {side} start") or l.startswith("MOTOR ERR"))
+    if line is None:
+        raise TeensyError("no reply from the Teensy")
+    return line
+
+
+def motor_stop():
+    line = send("MOTOR STOP", lambda l: l == "MOTOR stopped")
+    if line is None:
+        raise TeensyError("no reply from the Teensy")
+    return line
+
+
+def encoders_zero():
+    line = send("ENC ZERO", lambda l: l.startswith("ENC L="))
+    if line is None:
+        raise TeensyError("no reply from the Teensy")
+    return line

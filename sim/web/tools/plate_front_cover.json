@@ -1,0 +1,42 @@
+{
+ "name": "gerdoo front cover v11 (recessed arrows, wider sides, standing, snap-off fins)",
+ "process": {
+  "name": "Gerdoo covers 0.16 HQ - standing, PLA, no supports, fins + brim, gentle (tall thin walls)",
+  "enable_support": "0",
+  "brim_type": "outer_only",
+  "brim_width": "8",
+  "travel_acceleration": [
+   "3000"
+  ],
+  "default_acceleration": [
+   "2500"
+  ],
+  "inner_wall_speed": [
+   "100"
+  ],
+  "travel_speed": [
+   "400"
+  ],
+  "reduce_crossing_wall": "1",
+  "z_hop": [
+   "0.8"
+  ],
+  "z_hop_types": [
+   "Spiral Lift"
+  ]
+ },
+ "objects": [
+  {
+   "name": "front cover v12 (standing, wider, square ends) + fins",
+   "stl": [
+    "<export dir>/front_cover_v12.stl",
+    "<export dir>/fins_front.stl"
+   ],
+   "map": "z,x,y",
+   "at": [
+    128,
+    128
+   ]
+  }
+ ]
+}

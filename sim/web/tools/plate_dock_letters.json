@@ -1,0 +1,74 @@
+{
+ "name": "gerdoo dock letters + light-line diffuser v11 (print white)",
+ "process": {
+  "name": "Gerdoo dock letters 0.16 HQ - PLA, face down, XY -0.08 so they press into the 0.6 recess",
+  "enable_support": "0",
+  "xy_contour_compensation": "-0.08",
+  "brim_type": "no_brim"
+ },
+ "objects": [
+  {
+   "name": "letter 6 G (face down)",
+   "stl": "<export dir>/dock_letter_6_v11.stl",
+   "map": "x,-y,-z",
+   "at": [
+    60,
+    110
+   ]
+  },
+  {
+   "name": "letter 1 E (face down)",
+   "stl": "<export dir>/dock_letter_1_v11.stl",
+   "map": "x,-y,-z",
+   "at": [
+    90,
+    110
+   ]
+  },
+  {
+   "name": "letter 5 R (face down)",
+   "stl": "<export dir>/dock_letter_5_v11.stl",
+   "map": "x,-y,-z",
+   "at": [
+    120,
+    110
+   ]
+  },
+  {
+   "name": "letter 4 D (face down)",
+   "stl": "<export dir>/dock_letter_4_v11.stl",
+   "map": "x,-y,-z",
+   "at": [
+    150,
+    110
+   ]
+  },
+  {
+   "name": "letter 3 O (face down)",
+   "stl": "<export dir>/dock_letter_3_v11.stl",
+   "map": "x,-y,-z",
+   "at": [
+    180,
+    110
+   ]
+  },
+  {
+   "name": "letter 2 O (face down)",
+   "stl": "<export dir>/dock_letter_2_v11.stl",
+   "map": "x,-y,-z",
+   "at": [
+    210,
+    110
+   ]
+  },
+  {
+   "name": "light-line diffuser (lying flat)",
+   "stl": "<export dir>/dock_diffuser_v11.stl",
+   "map": "x,-z,y",
+   "at": [
+    128,
+    150
+   ]
+  }
+ ]
+}

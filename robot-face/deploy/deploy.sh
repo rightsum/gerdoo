@@ -84,7 +84,17 @@ ssh "$ROBOT" "export XDG_RUNTIME_DIR=/run/user/\$(id -u); \
   systemctl --user restart battery-bridge; \
   sleep 2; systemctl --user is-active battery-bridge || echo 'battery-bridge: not active'"
 
-echo "==> Installing kiosk autostart (replaces the old placetory autostart)"
+# The reactor screen drives the 1.69" LCD in the front cover over SPI. It holds the
+# GPIO lines while running, so a restart (not just a reload) picks up a new version.
+echo "==> Installing + starting reactor-screen unit (systemctl --user, no sudo)"
+ssh "$ROBOT" "export XDG_RUNTIME_DIR=/run/user/\$(id -u); \
+  cp $DEST/deploy/reactor-screen.service ~/.config/systemd/user/reactor-screen.service; \
+  systemctl --user daemon-reload; \
+  systemctl --user enable reactor-screen >/dev/null 2>&1; \
+  systemctl --user restart reactor-screen; \
+  sleep 2; systemctl --user is-active reactor-screen || echo 'reactor-screen: not active'"
+
+echo "==> Installing kiosk autostart (replaces the old Firefox kiosk autostart)"
 ssh "$ROBOT" "cp $DEST/deploy/robot-face-kiosk.desktop ~/.config/autostart/robot-face-kiosk.desktop; \
   rm -f ~/.config/autostart/firefox-fullscreen.desktop"
 

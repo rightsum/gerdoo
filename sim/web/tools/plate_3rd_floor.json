@@ -1,0 +1,54 @@
+{
+ "name": "gerdoo 3rd floor v2 + grille cap + antenna bracket + sensor mounts",
+ "process": {
+  "name": "Gerdoo 3rd floor + cap + antenna bracket 0.16 HQ - PLA, no supports",
+  "enable_support": "0"
+ },
+ "objects": [
+  {
+   "name": "3rd-floor-v2",
+   "stl": "<export dir>/3rd_floor_v2.stl",
+   "map": "x,-z,y",
+   "at": [
+    128,
+    128
+   ]
+  },
+  {
+   "name": "speaker grille cap (top down)",
+   "stl": "<export dir>/grille_cap.stl",
+   "map": "x,z,-y",
+   "at": [
+    208,
+    118
+   ]
+  },
+  {
+   "name": "antenna bracket, back v2 (one piece)",
+   "stl": "<export dir>/antenna_bracket_back.stl",
+   "map": "z,x,y",
+   "at": [
+    24,
+    128
+   ]
+  },
+  {
+   "name": "LDR cradle v6 (2 x M3, press-fit)",
+   "stl": "<export dir>/ldr_cradle.stl",
+   "map": "x,-z,y",
+   "at": [
+    16,
+    25
+   ]
+  },
+  {
+   "name": "DHT22 rail mount v2",
+   "stl": "<export dir>/dht22_mount.stl",
+   "map": "x,-z,y",
+   "at": [
+    16,
+    223
+   ]
+  }
+ ]
+}

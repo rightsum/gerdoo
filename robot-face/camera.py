@@ -54,12 +54,15 @@ DEFAULT_FPS = int(os.environ.get("ROBOT_CAMERA_FPS", "30"))
 # pair — whichever enumerated last. The USB port path is the only stable name
 # that tells them apart, which means each camera must stay in its own port
 # on the hub. Swap these two if the panel shows left and right reversed.
+# 2026-11-06: re-cabled when the 2nd floor went on. The hub moved to Jetson
+# port 2 and the cameras to hub ports 1 and 4 (were 2.1.2 / 2.1.3). Left is
+# hub port 1, right is hub port 4; the user confirmed these match the grippers.
 ARM_LEFT_DEVICE = os.environ.get(
     "ROBOT_ARM_CAMERA_LEFT",
-    "/dev/v4l/by-path/platform-3610000.usb-usb-0:2.1.2:1.0-video-index0")
+    "/dev/v4l/by-path/platform-3610000.usb-usb-0:2.2.1:1.0-video-index0")
 ARM_RIGHT_DEVICE = os.environ.get(
     "ROBOT_ARM_CAMERA_RIGHT",
-    "/dev/v4l/by-path/platform-3610000.usb-usb-0:2.1.3:1.0-video-index0")
+    "/dev/v4l/by-path/platform-3610000.usb-usb-0:2.2.4:1.0-video-index0")
 
 # 640x400, not 720p. All three cameras share one USB 2.0 bus, and UVC
 # reserves isochronous bandwidth when a stream opens. Measured on this
