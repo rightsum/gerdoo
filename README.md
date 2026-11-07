@@ -30,6 +30,7 @@ Everything below is working documentation, written for me and for the agents hel
 |---|---|
 | [`inventory.md`](inventory.md) | **The wiring reference.** Every part, datasheet-backed, with voltage/logic compatibility and the power architecture. Start here |
 | [`docs/logs/`](docs/logs/) | One write-up per problem or design decision: evidence, wrong turns, root cause, fix, verification |
+| [`print/`](print/) | **Every printed part**: Bambu A1 plates (3MF) and per-part STLs, with a print guide (materials, supports, inserts, times) |
 | [`teensy_bringup/`](teensy_bringup/) | Minimal health-check firmware + `health_check.py` |
 | [`teensy_microros/`](teensy_microros/) | micro-ROS node. Dual Serial, console preserved |
 | [`robot-face/`](robot-face/) | Kiosk face on the robot's screen + LAN control panel (mood, camera stream, live LiDAR view, video playback) |

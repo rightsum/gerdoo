@@ -32,8 +32,8 @@ teensy console    /dev/serial/by-id/usb-Teensyduino_Dual_Serial_19627940-if00
 teensy micro-ROS  /dev/serial/by-id/usb-Teensyduino_Dual_Serial_19627940-if02
 lidar             /dev/serial/by-id/usb-Silicon_Labs_CP2102N_USB_to_UART_Bridge_Controller_ec8fc9bc95d5ef11afac704b49d2c684-if00-port0
 brio 500 camera   /dev/v4l/by-id/usb-046d_Brio_500_2437ZBD0PNK8-video-index0
-arm camera left   /dev/v4l/by-path/platform-3610000.usb-usb-0:2.1.2:1.0-video-index0
-arm camera right  /dev/v4l/by-path/platform-3610000.usb-usb-0:2.1.3:1.0-video-index0
+arm camera left   /dev/v4l/by-path/platform-3610000.usb-usb-0:2.2.1:1.0-video-index0
+arm camera right  /dev/v4l/by-path/platform-3610000.usb-usb-0:2.2.4:1.0-video-index0
 ```
 
 ⚠️ **The arm cameras are the exception — by-path, not by-id.** Both OV9281 modules report serial `SN0001`, so `/dev/v4l/by-id/` holds one link for the pair. Their names are their **hub ports**: keep each camera in its own port, or left and right swap. See [log 027](docs/logs/027-2026-10-13-arm-cameras-on-the-panel.md).
@@ -90,7 +90,7 @@ These are keyed on each device's own serial number, so they also disambiguate bo
 | **Expansion** | 40-pin header (UART, SPI, I2S, I2C, GPIO) |
 | **Other I/O** | 12-pin button header · 4-pin fan header · DC power jack |
 | **Dimensions** | 103mm × 90.5mm × 34.77mm (with heatsink) |
-| **Power Supply** | 19V DC (45W, included) |
+| **Power Supply** | 19V DC (45W, included: NVIDIA/LiteOn PA-1450-26, 19 V 2.37 A). **Too small for the robot** (log 056): replaced 2026-11-07 by a **LEICKE ULL 19 V 4.74 A 90 W** (NT00348, 5.5 × 2.5 tip, centre +). The 45 W stays as a spare |
 | **Price** | $249 USD |
 
 ### Relevance to this inventory
@@ -178,6 +178,45 @@ These are keyed on each device's own serial number, so they also disambiguate bo
 - **LiDAR:** ❌ **not on the Teensy.** RPLIDAR C1 goes to a Jetson USB port via its CP2102N adapter — it already contains its own MCU, so the Teensy would only be a middleman. `Serial1` is **free**. See Navigation & LiDAR section
 - **ROS 2:** runs micro-ROS as `/teensy_node` over **Dual Serial** (`usb=serial2`) — `if02` carries XRCE-DDS, `if00` stays a human console. Agent is a systemd user service on the Jetson.
 - **Ultrasonic:** use the **HC-SR04P** (3.3V, direct connect). The classic 5V HC-SR04 needs a resistor divider on ECHO — pins are not 5V tolerant. Wiring tables in Sensors section
+
+### Treedix Terminal Block Breakout for Teensy 4.1
+- **Store:** Amazon.de (Treedix UK) · **ASIN:** B0CM6L8XBT
+- **Link:** https://www.amazon.de/dp/B0CM6L8XBT
+- **Qty:** 1 · **Price:** €12.99 · **Status:** In hand
+- **Specs:**
+  - Board: 66.0 × 40.6 mm (2.60 × 1.60 in), from the vendor drawing
+  - Mounting: 4 corner holes, about **62.8 × 37.1 mm** centre to centre. ⚠️ Scaled from the drawing, not measured, and the hole size isn't given (they look M2). Measure before printing a mount — see Open Items
+  - The Teensy sits in the middle. Every pin runs out to a screw terminal along the two long edges:
+    - Edge A: `VIN GND 3.3V 23–13 GND 41–33`
+    - Edge B: `GND 0–12 3.3V 24–32`
+  - USB end on one short edge (marked on the silkscreen). Proto area under the Teensy
+  - Also fits Teensy 3.5 / 3.6
+- **Mounting:** on the 1st layer (`1st-layer-v4` in Fusion), between the two IBT-2 drivers, with each terminal row facing one driver
+
+#### Full pin map (2026-10-27)
+
+Power comes from the Jetson over USB. **`VIN` stays empty** (max 5.5 V).
+
+| Edge B terminal | Goes to | | Edge A terminal | Goes to |
+|---|---|---|---|---|
+| GND | ground board (the Teensy's own spur) | | VIN | **nothing** |
+| 0 / 1 | right encoder A / B | | GND | logic grounds |
+| 2 / 3 | empty (old SG90 neck; the neck is on the servo bus now) | | 3.3V | 3.3 V strip |
+| 4 | D4184 `PWM` (LED strip) | | 23 / 22 | right IBT-2 LPWM / RPWM |
+| 5 / 6 | left IBT-2 RPWM / LPWM | | 21 | right IBT-2 R_EN + L_EN, 10 kΩ to GND |
+| 7 | left IBT-2 R_EN + L_EN, 10 kΩ to GND | | 20–16 | empty |
+| 8–12 | empty | | 15 (A1) | photoresistor `S` |
+| 3.3V | 3.3 V strip | | 14 (A0) | voltage sensor `S` |
+| 24–27 | empty | | 13 | empty (onboard LED) |
+| 28 (RX7) | servo adapter `RX` | | GND | logic grounds |
+| 29 (TX7) | servo adapter `TX` | | 41 | empty |
+| 30 / 31 | left encoder A / B | | 40 / 39 | back-right ultrasonic ECHO / TRIG |
+| 32 | empty | | 38 / 37 | back-left ultrasonic ECHO / TRIG |
+| | | | 36 / 35 | front-right ultrasonic ECHO / TRIG |
+| | | | 34 / 33 | front-left ultrasonic ECHO / TRIG |
+
+- **3.3 V loads (9 wires, under 100 mA):** both IBT-2 `VCC` (header pin 7), both encoders, the 4 HC-SR04P and the photoresistor. Two 3.3V screws can't take 9 wires, so run each to a small terminal strip.
+- **Logic grounds:** IBT-2 header pin 8 (×2), encoders, ultrasonics, photoresistor, voltage sensor `−`, D4184 header `GND`, servo adapter UART `GND`. Use the ground board when the Teensy's GND screws run out.
 
 ---
 
@@ -328,6 +367,35 @@ Also: MJPEG-only means the Jetson CPU-decodes every frame, and JPEG artifacts si
   - Interface: SPI (4-wire)
   - Panel: IPS
   - Compatible: Arduino, ESP32, Raspberry Pi 4B/3B+/Zero
+- **The board is a Waveshare "1.69inch LCD Module"** (logo on the back, photo 2026-10-16).
+  Mechanical data from Waveshare's [2D drawing](https://files.waveshare.com/upload/4/41/1.69inch_LCD_Module_2Ddrawing.pdf):
+  - PCB 31.5 × 39.0 mm · 4× M2 at 3.6 mm from the edges (24.3 × 31.8 centre to centre),
+    brass standoffs on the back
+  - Glass 30.07 × 37.43 · active area 27.97 × 32.63, 1.10 mm below the glass top,
+    FPC tab at the bottom
+  - Glass front to PCB back 3.4 mm · to the standoff ends 5.9 · to the connector 7.1
+  - **The glass covers the four holes**, so the module can only be held from behind,
+    through its standoffs
+  - Connector: GH1.25 8-pin, side entry (VCC GND DIN CLK CS DC RST BL)
+- **Mounted in:** the front cover's reactor (`front-cover-v1`, log 030)
+- **Wiring (2026-10-29): straight to the Jetson's 40-pin header, SPI0.**
+  - This replaces log 030's plan to drive it from the XIAO on the reSpeaker core board: Seeed doesn't document which XIAO pins the XVF3800 board leaves free, and the Jetson already knows the robot's state.
+
+  | Display | Jetson header pin | Function |
+  |---|---|---|
+  | VCC | 17 | 3.3 V |
+  | GND | 20 | GND |
+  | DIN | 19 | SPI0 MOSI (`/dev/spidev0.0`) |
+  | CLK | 23 | SPI0 SCK |
+  | CS | 24 | SPI0 CS0 |
+  | DC | 29 | GPIO `PQ.05` |
+  | RST | 31 | GPIO `PQ.06` |
+  | BL | 32 | GPIO `PG.06` (backlight on/off) |
+
+  - **Pins 19/23/24 must be switched to SPI once:** `sudo /opt/nvidia/jetson-io/config-by-function.py -o dt 1="spi1"`, then reboot. (jetson-io calls this pin group "spi1"; the kernel names it spidev0.)
+  - **Pins 29/31/32 must be taken out of tristate as well:** JetPack 6 leaves them as inputs, with their output drivers off. The installed overlay adds them; the SPI-only original is kept as `.spi-only.bak` (log 047). User `jarvis` is in the `gpio` group, which owns `/dev/spidev0.0` and `/dev/gpiochip*`.
+  - **8 MHz SPI at most over the jumper wires**: 10 MHz and up shows static.
+  - Driven by `robot-face/reactor_screen.py` (service `reactor-screen`), log 047.
 
 ### DisplayPort → HDMI Adapter (4K)
 - **Store:** LccKaa Choice Store
@@ -352,7 +420,7 @@ Also: MJPEG-only means the Jetson CPU-decodes every frame, and JPEG artifacts si
 
 ## 🦾 Servos & Motor Control
 
-### STS3215 12V 30KG TTL Serial Bus Servo (×16)
+### STS3215 12V 30KG TTL Serial Bus Servo (×18: 16 in the arms, 2 for the neck)
 - **Store:** Feetech Official Store
 - **Link:** https://www.aliexpress.com/item/1005008670304643.html
 - **Qty:** 3 · **Total:** €299.90 (refunded) · **Status:** Completed
@@ -365,6 +433,7 @@ Also: MJPEG-only means the Jetson CPU-decodes every frame, and JPEG artifacts si
   - Gear: Metal gears
   - Use case: SO-ARM100 / LeRobot robot arm
   - Variant: 6pcs packaging
+- **Allocation:** 3 packs × 6 = 18. The arms use 16 (IDs 1–8, 11–18). The 2 spares become the neck (pan 21, tilt 22, log 035), replacing the SG90 gimbal. **IDs set 2026-10-30** (pan first on its own, then tilt chained behind it); the neck still needs its branch off the adapter and Teensy `NECK` commands with limits before it moves.
 
 ### Waveshare Bus Servo Adapter (A)
 - **Store:** Raspberry Pi Store
@@ -474,7 +543,7 @@ Teensy 4.1 has **4 hardware quadrature decoders** — two motors × two channels
   - Control input level: 3.3–5V (module marketing claim; see caveat)
   - Duty cycle: 0–100%
   - Protection: overtemperature, overvoltage, undervoltage, overcurrent, short circuit; internal dead-time generation
-  - Board: 50 × 50 × 43mm, ~66g
+  - Board: 50 × 50 × 43mm, ~66g (listing). **Measured 2026-10-16: 50.2 × 49.1 mm, 40.9 mm tall.** The heatsink is **under** the board. The terminal block, capacitor and 8-pin header are on top, with the power/motor terminals on the edge opposite the header. On the 1st layer it stands on M3 standoffs beside the heatsink (log 029)
   - Use case: Bidirectional DC motor control (robot drive)
 
 #### Header pinout (8-pin control side)
@@ -543,6 +612,21 @@ Both exceed the Teensy 0–3.3V ADC input. Leave them unconnected, or add a divi
 | L_IS (6) | unconnected | or divider — see above |
 | B+ / B− | 3S LiPo | 11.1V nominal, within 6–27V |
 | M+ / M− | motor | |
+
+#### Pin assignment — both drives (assigned 2026-10-26)
+
+R_EN and L_EN are joined on each module and driven by one Teensy pin, with a **10 kΩ pull-down to GND**, so the bridge stays off while the Teensy boots or resets.
+
+| Signal | Left IBT-2 | Right IBT-2 |
+|---|---|---|
+| RPWM (1) | 5 | 22 |
+| LPWM (2) | 6 | 23 |
+| R_EN + L_EN (3+4) | 7 | 21 |
+| Encoder A / B | 30 / 31 | 0 / 1 |
+
+- **PWM:** each pin can be set to 20 kHz. Pin 4 (LED strip, 18 kHz) is on a different PWM timer, so neither one changes the other's frequency.
+- **Encoders:** these pins can use the hardware quadrature decoders. Serial1 (0/1) is free since the lidar moved to USB.
+- No firmware drives the motors yet.
 
 #### PWM frequency
 
@@ -704,6 +788,8 @@ All of it is unnecessary now. Recorded only so the reasoning is not re-derived.
 
 ✅ **Preferred part for Teensy 4.1.** Direct connect when powered at 3.3V.
 
+**On the robot:** 4 pods under the 1st layer, 2 each side of each caster (log 034). That needs 8 Teensy pins and 2 more of these (open item 18).
+
 ### Ultrasonic — shared timing spec
 
 Handson Technology user guide, Figure 4. Applies to both variants.
@@ -723,6 +809,19 @@ Target surface should be ≥0.5m² for a stable reading.
 ### Ultrasonic — wiring to Teensy 4.1
 
 Teensy 4.1 pins are 3.3V and **not 5V tolerant**. The two variants are handled differently.
+
+#### Pin assignment — 4 pods (assigned 2026-10-25)
+
+Pins 33–40 sit in one row on the Teensy's bottom-right edge, so the 8 signal wires land together. Left/right are the robot's own, facing front (the Teensy side).
+
+| Pod | TRIG | ECHO |
+|---|---|---|
+| Front-left | 33 | 34 |
+| Front-right | 35 | 36 |
+| Back-left | 37 | 38 |
+| Back-right | 39 | 40 |
+
+This uses Serial8 (34/35) and A14–A16 (38–40); A2–A13 and the other serial ports stay free. No firmware reads these yet.
 
 #### HC-SR04P — direct, powered at 3.3V
 
@@ -814,7 +913,7 @@ Design rule: **the power rails carry power only — never a signal that touches 
 | **12V electronics pack (3S 50E)** | battery | Jetson, Teensy VIN, anything logic | 10 A available, ~2.8 A drawn |
 | **Teensy 3.3V regulator** | onboard | IBT-2 header pin 7 (74HC244 VCC), motor encoders, HC-SR04P | logic reference for everything; ~250 mA available, actual draw a few mA |
 | **Jetson USB 5V** | Jetson | RPLIDAR C1, Brio 500 camera | no converter involved — see Navigation & LiDAR |
-| **Charger** | **XL4015 #1** | 19V input → 12.6V CC/CV to pack | ⚠️ requires the CC/CV variant — **open item 1** |
+| **Charger** | **XL4015 (Hailege, 2026-11-06)** → **3S-1A charger board (ordered 2026-11-07)** | 19V input → 12.6V CC/CV to the power pack | ⚠️ The XL4015's current limit is bypassed whenever the Jetson shares the 19 V supply (log 058); being replaced. See Charging |
 | **5V servo rail** | **LM2596S** from 12.6V | SG90 neck pan/tilt servos | ✅ Live. 3A. Adjustable — see the 6V note below |
 | **5V lighting rail** | **MINI560** from 12.6V | COB LED strip via D4184 MOSFET | ✅ Live, added 2026-08-26. Dedicated, see below |
 | **12V direct** | battery | reSpeaker XVF3800 2-pin 12 V terminal (feeds its 10 W amp) | ✅ Live, added 2026-09-15. USB-C carries data only. Unfused — see Fusing |
@@ -850,7 +949,7 @@ To get more torque out of the SG90s. **Not yet done** — three checks must pass
 
 **Better fix, using parts already owned:** 2 of the **16× STS3215** bus servos. 25× the torque, metal gears, position feedback, and they run straight off the 12V pack — deleting this rail question entirely. The migration notes already call for exactly this.
 
-Spares: **5 × MINI560** (1 now in use), 1 × XL4015.
+Spares: **5 × MINI560** (1 now in use), **2 × XL4015 (Hailege)**. The original XL4015 #1 and the old spare are dead (log 055: battery connected backwards) — don't reuse them.
 
 > The lidar's ripple sensitivity used to drive this whole architecture — a dedicated quiet rail with ≤150 mV ripple existed solely for it. Moving it to Jetson USB removed the constraint, a converter, and a failure mode.
 
@@ -874,6 +973,10 @@ The 40 A BMS will not notice 7 A flowing through a 3 A wire. A short downstream 
 
 Silicone wire ampacity (conservative, chassis): 14 AWG ≈ 30 A · 16 AWG ≈ 22 A · 18 AWG ≈ 16 A · 20 AWG ≈ 11 A · 22 AWG ≈ 7 A.
 
+**Colours (Standard/ATO blades):** 5 A tan · 15 A blue · 20 A yellow · 30 A green. The rating is also printed on top of each fuse.
+
+**As built, all 18 STS3215s (both arms and the neck) share one Waveshare adapter, so they share one feed and one fuse.** Use **15 A (blue)** there, not 30 A (green). 30 A is above what 16 AWG carries (~22 A), so the wire would overheat before the fuse blew. Normal work draws a few amps in total (see the daisy-chain table below).
+
 **The 15 A arm fuse is deliberately below stall (21.6 A).** A whole-arm stall *should* cut power. It passes rated torque (7.2 A) and normal transients comfortably.
 
 **Type:** automotive **blade fuses, Standard (ATO/ATC) size** — not Mini. Rated 32 V DC, vibration-tolerant, inherently slightly slow so motor inrush does not nuisance-trip, holders come pre-wired. Standard has more contact area than Mini, so it runs cooler at 20–30 A, which is the failure being guarded against. Avoid glass cartridges (fragile) and PPTC (too slow, too resistive at these currents).
@@ -890,7 +993,7 @@ Two [ElRobot](https://github.com/norma-core/norma-core/tree/main/hardware/elrobo
 
 **As built (log 028):**
 - **One adapter for both arms,** in UART mode (jumper A), driven by the Teensy's `Serial7` (pins 28/29).
-- **IDs: left 1–8, right 11–18,** base to gripper. Both arms share one bus, so their IDs must not overlap.
+- **IDs: left 11–18, right 1–8,** base to gripper (relabelled 2026-11-06: the 1–8 arm is mounted on the robot's right, so firmware 0.5.1 maps sides to IDs that way). Both arms share one bus, so their IDs must not overlap. Joint limits are stored per ID, so they follow their arm.
 - **All 16 servos run in multi-turn mode** (Phase bit 4 on, servo angle limits 0/0). Most joints' encoder rollover sits *inside* their travel, because the servos weren't centred before mounting. In single-turn mode the servo cannot drive through it (log 028).
 - **Joint limits live in the Teensy's EEPROM,** one record per servo ID.
 - **Firmware console commands:**
@@ -999,7 +1102,42 @@ Separate supply rails are harmless on their own. Grounding is where a multi-rail
 - **Never route servo or LED return current through the Teensy GND pin.** Each buck's negative goes directly to the battery negative / star point; the Teensy gets its own spur to that same point.
 - **VUSB / VIN:** if Teensy VIN is ever fed from a buck while USB is also connected, cut the VUSB↔VIN pad on the board underside first. Not needed if the Teensy stays USB-powered.
 
+**Ground layout (2026-10-21, the user's design).**
+
+```
+POWER PACK                              ELECTRONICS PACK
+P+ ─[fuses]──► IBT-2 ×2, arm feed       P+ ─[5 A fuse]──► UPS, hub, XVF3800, bucks, charger
+P− ◄────────── IBT-2 B−, arm GND        P− ──16 AWG──► GND BOARD ◄── all small − leads
+ │                                                        ▲          (Teensy, sensors, IN− of bucks)
+ └────────────── 16 AWG link: the common ground ──────────┘
+```
+
+- **Motors and servos go straight to the power pack,** + through their fuse and − back to its BMS P−, as a pair. They don't pass through any board.
+- **Ground board:** an Evemodel PCB007 (24+2 terminals, 10 A, ~1.5 mm² max), used for ground only, with rows A and B bridged.
+  - It takes every small return: the UPS input (~2.1 A), the XL4015 charge return (~2 A), the MINI560 / LM2596S IN− (~2 A), the hub 12 V (~1 A), the XVF3800 12 V (~0.8 A), the Teensy spur and the sensors. That's about 8 A.
+  - Use ferrules on stranded wire. Check the terminals' continuity with a meter first.
+- **The link between the packs' P−** carries almost nothing in normal use; it only holds both 0 V levels together. It's 16 AWG anyway, so that current never prefers the thin paths below.
+  - **As built (2026-11-07):** not fitted. The user hasn't wired a ground between the Teensy and the power pack; the two are joined only through signal grounds (voltage sensor, servo adapter). A meter check of power-pack P− to Teensy GND is open (log 058).
+- **Crimp the IBT-2 B− and the arm GND solidly** (ring terminal or ferrule). If one comes loose, its current returns through IBT-2 header pin 8 or the adapter's UART GND, then the Teensy. That burns them.
+
+The grounds are already joined whether wired or not: USB (Teensy, hub, cameras → Jetson), the servo adapter's UART GND and IBT-2 header pin 8 all tie logic ground to power ground. A short, thick wire from each power return to the star keeps motor and servo current out of those thin paths.
+
+Three exceptions:
+- **A pack's ground is its BMS P−, never B− or a cell negative.** The BMS switches the negative side. A second wire to B− (a voltage sensor, a balance tap, a holder strap) bypasses that switch, so a short or a flat pack is never cut off. Measure pack voltage between P+ and P− too.
+- **The LED strip's − goes only to the D4184's OUT−.** The D4184 switches the low side; tie the strip's − to ground and it is always on.
+- **Join negatives only.** Never join the two packs' + leads: different charge states push large current from one pack into the other, and it undoes the split.
+
 #### Charging
+
+> **As built, 2026-11-07 (logs 055–058):**
+> - **Supply:** LEICKE 90 W, 19 V, into the robot's DC jack. It feeds the Jetson's UPS input (Jetson + UPS charging ≈ 33 W) and the power-pack charger (≈ 29 W at 2 A). The 45 W NVIDIA supply latched off under that ≈ 62 W.
+> - **Charger now:** a Hailege XL4015 (the original died 2026-11-05 when the pack was briefly connected backwards), CV **12.60 V at the board**, CC **2.0 A**, then the 30SQ050 (**3 A**, not 30 A), a fuse, and the pack's **P+**. The pack plateaus at **≈ 12.27 V** (one diode drop below 12.60 V, ≈ 90 %).
+> - ⚠️ **The XL4015 measures its current on the negative side** (R050 between IN− and OUT−). The robot's shared ground — the voltage sensor and servo-adapter grounds to the Teensy, USB to the Jetson, the UPS to the supply's − — bypasses it whenever the Jetson is on the same supply: a whine, and an estimated 3–4 A. **Rule until replaced: charge the power pack only with the Jetson unplugged from the supply.**
+> - **Replacement ordered:** a 3S 1 A charger board (YWBL-WH "Multicell 3S-1A", Amazon B07SG1RB1Q, 14.8–23 V in, 1S/2S pads open = 3S). Arrival check: its sense resistor must connect to **B+** (beeps on continuity), not B−. Wire it supply → UIN/GND, B+/B− → pack **P+/P−**, drop the 30SQ050 (its SS34 input diode covers a reversed supply), add an XT30 and a 5 A fuse. Log one full charge with the Jetson on the same supply before closing the floor.
+> - **Voltage sensor:** since 2026-11-06 wired straight to the power pack (S → pin 14). The firmware falls back to the servos' register-62 reading if A0 shows nothing.
+> - **The power pack drains overnight** (12.18 → 11.05 V in 12 h, robot "off"): fit a main switch or unplug it when parked.
+>
+> The plan below is the original (2026-08) design; where they differ, the notes above win.
 
 19V input → 12.6V CC/CV via **XL4015 #1**, into the 3S pack.
 
@@ -1199,11 +1337,23 @@ Logic-level parts that do work: **AOD4184/D4184**, **IRLZ44N**, **IRLB8721**.
 - **Qty:** 20 · **Price:** €5.99 · **Status:** Ordered 2026-08-19
 - **Specs:**
   - Type: 30SQ050 Schottky diode
-  - Current: 30A (12× headroom over 2.37A charge current)
+  - Current: **3 A** average (the "30" in 30SQ means 3.0 A, not 30 A). Enough for a 2 A charge, but at 2 A it drops ~0.45 V and dissipates ~0.9 W, so it runs hot: leave ~10 mm leads and keep the body off PLA.
   - Voltage: 50V reverse
   - Forward drop: ~0.3-0.4V (Schottky — stable across charge cycle)
   - Package: Axial, 6.2 cm length
 - **Use case:** Reverse-current protection between XL4015 output and 3S pack. Prevents battery draining backward through the XL4015 when the 19V source is off. Oriented: anode → converter, cathode (band/`-` side) → pack. Set CV to 12.60V measured at pack terminals (after diode).
+
+### JOREST Inline Blade Fuse Holder, 12 AWG, waterproof (3pcs + fuses)
+- **Store:** Amazon.de (JOREST) · **ASIN:** B0DFYNTT6Z
+- **Link:** https://www.amazon.de/dp/B0DFYNTT6Z
+- **Qty:** 3 holders + 10 fuses · **Status:** In hand
+- **Specs:**
+  - Type: inline flat-blade fuse holder with waterproof cap, 12 V
+  - Leads: 12 AWG
+  - Fuses included: 10, 15, 20, 25, 30, 35 and 40 A
+  - ⚠️ The listing doesn't name the blade size. Check it takes **Standard (ATO/ATC)**, which the Fusing plan calls for, not Mini
+- **Use case:** the fuse between the power pack and the Waveshare servo adapter. 12 AWG is thicker than the 16 AWG the Fusing table asks for, so the leads are fine.
+- ⚠️ **One fuse now covers both arms.** The Fusing table plans a 15 A fuse per arm, but as built both arms run through one adapter (log 028). Two arms at rated torque draw 2 × 7.2 A = 14.4 A, right at 15 A. Re-size this branch before fitting it.
 
 ---
 
@@ -1218,6 +1368,16 @@ Logic-level parts that do work: **AOD4184/D4184**, **IRLZ44N**, **IRLB8721**.
   - Power: Micro USB charge, 9–24V input
   - Compatible: Raspberry Pi 5/4B, Jetson Orin Nano, ROS robotic equipment
   - Data: USB 3.0 (5Gbps)
+- **In hand 2026-10-16** (board YB-ER001-V2.0). Its mounting holes measure
+  **58.2 × 50.2 mm**.
+- **Vendor drawing:**
+  - board 65 × 56; 68.5 with the ports and 60.35 with the switch
+  - 19.6 mm tall with the ports
+  - 4× Ø2.8 holes (M2.5) on **58 × 49**
+- **The 2nd floor uses the vendor's 58 × 49.** The user's 50.2 was a measuring slip
+  (2026-10-17).
+- **On the 2nd floor:** Ø2.1 pilots for M2.5 standoffs. Face the switch edge away from the
+  Jetson; the board edge clears it by about 1 mm.
 
 ### 240W 40Gbps USB-C to USB-C Cable (90°) — pending delivery
 - **Store:** Speeding and Running Digital Store
@@ -1277,7 +1437,21 @@ Logic-level parts that do work: **AOD4184/D4184**, **IRLZ44N**, **IRLB8721**.
 - **Specs:**
   - Type: DC-022B panel mount
   - Rating: 3A, 12V
-  - Size: 5.5×2.5mm (also fits 5.5×2.1mm)
+  - Size: 5.5×2.5mm. The listing says "also fits 5.5×2.1", but a 2.1 plug won't seat on its 2.5 pin; see the AXFEE note below.
+  - **Thread measured 7.2 mm** (2026-10-17), so panel holes are Ø7.5. One sits between the
+    robot's pogo pins and one on the dock's left side (19 V 3 A in). 3 A is this jack's
+    limit, so use ≥ 18 AWG wire.
+
+### AXFEE DC Barrel Plugs + Jacks 5.5×2.1mm (8pcs: 4 plug, 4 jack)
+- **Store:** Amazon.de (AXFEE) · **ASIN:** B0DX7DGYKL
+- **Link:** https://www.amazon.de/dp/B0DX7DGYKL
+- **Qty:** 8 · **Status:** In hand
+- **Specs:**
+  - Connector: 5.5 × 2.1 mm barrel, 4 male + 4 female
+  - Wire-on type (sold for CCTV / LED strips). The listing gives no current rating; this type is usually rated 4–5 A
+- **Use case:** pack → Waveshare servo adapter. The adapter's DC jack is 5.5×2.1.
+- ⚠️ **Too small for the arm current.** The adapter feeds both arms (log 028), which is 14.4 A at rated torque. A 4–5 A barrel heats up and melts its insulation. Feed the pack into the adapter's **green screw terminal**, and keep the barrel for current-limited bench supplies.
+- ⚠️ **2.1 ≠ 2.5.** The DC-022B jacks and the extension cable above are 5.5×2.5. The second number is the jack's centre pin, which is the plug's inner hole. **A 2.1 plug jams partway onto a 2.5 pin**, which gives a poor centre contact that heats up. **A 2.5 plug slides fully onto a 2.1 pin but sits loose**, so the contact is intermittent. (Corrected 2026-10-23; this line used to say the opposite.)
 
 ### Spring Loaded Pogo Pin 5.5mm 5A (2pcs)
 - **Store:** RTLECS Technology Store
@@ -1289,6 +1463,19 @@ Logic-level parts that do work: **AOD4184/D4184**, **IRLZ44N**, **IRLB8721**.
   - Current rating: 5A
   - Model: GF55-17770-3533
   - Plating: Gold plated
+  - **Measured 2026-10-17:** overall length 19.9 mm, plunger tip Ø3.4 mm. Spring travel
+    not measured yet.
+  - **Vendor drawing (RTLECS H214 5A, 2026-10-21):** the "5.5 mm" is the **collar**, not the body.
+    - Plunger Ø2.5, about 7.5 mm long; body Ø3.5 × 10.2 up to a **Ø5.5 collar** at the tail end.
+    - Tail Ø3.5 × about 2.5, grooved for the wire.
+    - Free length **21** (the 19.9 above had the spring squeezed by the caliper, so travel ≥ 1.1).
+  - **Mounted in the back cover (`back-cover-v1` v7, log 041):**
+    - inserted from inside: a Ø3.7 bore, with the collar in a Ø5.9 × 0.8 seat at the back of the sleeve;
+    - the tip sticks out **9 mm** past the dock floor, and the tail ends 3.8 mm in front of the battery holder;
+    - the dock's stop pads moved 3.48 mm toward the robot, so the plates compress the pins about 1.3 mm.
+- **Dock contacts:** two copper-clad plates, **43.7 × 34.2 mm**, measured 2026-10-17.
+  Thickness 1.5 mm (user, 2026-10-17). The dock holds them upright (34.2 wide) at x ±20 mm.
+  The pins moved to ±20 to match, which gives about ±17 mm sideways tolerance.
 
 ### Servo Extension Cable 150-500mm Futaba JR (10pcs)
 - **Store:** YUGUO baby Store
@@ -1348,6 +1535,15 @@ Logic-level parts that do work: **AOD4184/D4184**, **IRLZ44N**, **IRLB8721**.
   - Use case: Robot illumination / lighting
 - **In service 2026-08-26:** dedicated MINI560 5V rail → D4184 MOSFET → Teensy pin 4 PWM
   at 18 kHz, brightness following the A1 photoresistor
+- **Variant: KA009** (user, 2026-10-16). Vendor table: filament **300 mm**, H **1 mm**,
+  driver board 13.7 × 9.9 mm on one end (+5V / GND pads), **220 mA at 5 V**.
+  - ✅ **The filament is 2 mm thick** (the user, on the part, 2026-10-21). The "1 mm" from
+    the vendor table and Bambu Lab's page was wrong, and the first cover's 1.3 mm groove
+    didn't take it (log 042). The groove is now **2.4 wide × 2.0 deep**, and the lead-out
+    hole 2.6 × 5.6.
+  - It can't be cut, so the whole 300 mm is used: it outlines the mouth (log 030).
+  - The board is a constant-current driver. Dimming it by switching its supply at
+    18 kHz may flicker or dim unevenly. Test it, and try ~1 kHz if it does.
 
 ⚠️ **No inline fuse fitted yet.** This branch is currently unprotected — see Fusing.
 
@@ -1380,6 +1576,18 @@ Divider polarity varies by batch. Firmware has an `LDR_BRIGHT_IS_HIGH` constant 
   - Power: **5 V** on USB-C or 5 V JST, **12 V** on the 2-pin terminal
   - USB: UAC 2.0, 2- and 6-channel USB firmware variants; also an I2S mode for the XIAO
 - **Wiring:** 12 V from the battery on the 2-pin terminal · USB-C to the Jetson (data)
+- **Mic array is a ring, not a disc** (Seeed STEP `reSpeaker xvf3800 44mm_circular`,
+  photos 2026-10-16):
+  - OD 72.5 · ID 52.5 · 1.51 mm PCB · 4× IM69D130 mics, **bottom-port**
+  - Sound enters through Ø1.0 PCB holes at (±22, ±22), on the plain side.
+    **The plain side faces outwards.**
+  - 3× Ø3.3 holes at r 31.25. Seen from the mic side with the FPC down, they sit at
+    12, 4 and 8 o'clock
+  - The FPC connector is at 6 o'clock
+- **Speaker** (the one on the amp's JST): ALMOCN 2" (2.08") square-frame driver, 18.1 g.
+  M3 holes on a **43.4 mm square**, measured 2026-10-16. Depth not given.
+- **Mounted in:** the ring sits in the front cover's reactor cup. The core board is on
+  the 2nd floor, and the speaker hangs under the 3rd floor (log 030).
 - **On the Jetson:** USB `2886:001e`, ALSA card name **`C16K6Ch`** — it arrived already
   on the **6-channel USB firmware**, no flashing needed. Playback 2 ch, capture 6 ch,
   both **16 kHz S16_LE only**.
@@ -1821,6 +2029,12 @@ Things that need a meter or a look at the physical part, not a datasheet.
 | 7 | **Screen power draw** | Meter the panel's **own** supply. A prior session measured ~5.9W *total Jetson board* power running the face, but the panel is fed separately so it likely sits outside that figure |
 | ~~8~~ | ~~Camera enumeration~~ | ✅ **Done 2026-10-13** — both OV9281s enumerate. `quirks=128` turned out to be irrelevant for MJPEG, so the arms run at 640×400 instead. See log 027 |
 | 9 | **36GP-555 stall current** | Not recorded here — the one hole in the power budget, exactly where the drive base sits. Sets the drive-motor fuse (20A is provisional) |
+| ~~13~~ | ~~Treedix Teensy breakout — mounting holes~~ | ✅ **Measured 62.2 × 37.0** (2026-10-17). `tb_hole_dz`/`tb_hole_dx` updated in `1st-layer-v4` |
+| 14 | **HC-SR04P mounting holes** | The user says the boards are standard. The **4 pods** (2 front, 2 back, log 034) have M2 bosses on 42 × 17, with the board 10.75 mm behind the can holes so the transducers stand 1.25 mm proud. Clones vary (log 032) |
+| 18 | **Two more HC-SR04P** | The robot now uses 4 ultrasonic sensors (log 034). In stock: 2× HC-SR04P + 2× classic 5 V HC-SR04. Buy 2 more HC-SR04P so all four wire directly at 3.3 V, or use the classics with 5 V and the ECHO divider |
+| ~~16~~ | ~~Light dial potentiometer~~ | ✅ **There is none** (2026-10-17). Brightness comes from the AOICRIE dual-MOSFET (D4184) module on the base, PWM up to 20 kHz. The back cover's dial hole is closed |
+| 17 | **Heat-set inserts** | Use the user's panel standard, **Ø4.4** (through the plate, or 7 deep blind). All new insert holes follow it (log 032) |
+| 15 | **Pogo pin travel (GF55-17770-3533)** | The dock's plates sit ~2.6 mm in front of a pin tip that protrudes 6 mm. Set the protrusion so the pins compress 1–1.5 mm at docking (log 031) |
 | 10 | **Which 5.5" panel is fitted** | The AM-OLED is listed *Pending* and the IPS as *BROKEN*. Touch does not enumerate at all — if the fitted panel is the broken IPS, that is the explanation. See Displays |
 
 ### Migration notes — Arduino Nano → Teensy 4.1

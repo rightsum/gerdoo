@@ -103,7 +103,7 @@ Test the connection from the 19V charger and manage the charging voltage for the
 
 - **Problem identified:** XL4015 has no reverse-current blocking. When the 19V source is off and the pack stays connected, the battery slowly drains backward through the converter. Not dangerous (slow drain), but wastes charge.
 - **Why the 10A10 (already in inventory) was rejected:** Silicon diode, ~0.7-1.0V forward drop that varies with current. This was likely the cause of the earlier 11.69V pack voltage (converter at 12.68V minus ~1V diode drop = ~11.7V). The varying drop makes it impossible to set a stable CV for Li-ion charging.
-- **Solution ordered:** 20× 30SQ050 Schottky diode (30A, 50V) from Amazon.de — €5.99, ASIN B0BYVGWTHD. Schottky drop is only ~0.3V and nearly constant across the charge cycle.
+- **Solution ordered:** 20× 30SQ050 Schottky diode (**3 A**, 50 V; corrected 2026-11-07, this said 30 A — see log 050) from Amazon.de — €5.99, ASIN B0BYVGWTHD. Schottky drop is only ~0.3V and nearly constant across the charge cycle.
 - **Installation plan (when diodes arrive):**
   - Solder inline on the positive wire between XL4015 output and pack
   - Orientation: anode (no band) → converter side, cathode (band/`-`) → pack side

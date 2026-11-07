@@ -5,7 +5,7 @@
 | **Date** | 2026-08-04 |
 | **Type** | Adoption — pre-existing subsystem brought under this project |
 | **Status** | ✅ Adopted at `robot-face/`, verified against the running deployment |
-| **Origin** | Separate session, ~2026-07-05. Memory: `-Users-rightsum/memory/robot-face-project.md` |
+| **Origin** | Separate session, ~2026-07-05. Memory: the assistant's project memory (`robot-face-project.md`) |
 | **Live** | Running on `jarvis` right now — service `active`+`enabled`, Firefox kiosk up |
 
 ---
@@ -40,7 +40,7 @@ That made the point: **the display is not a spare terminal, it is a dedicated ou
 
 ## Verification before adopting
 
-The Mac source at `/Users/rightsum/robot-face` and the live deployment at `/home/jarvis/robot-face` were compared file by file:
+The Mac source at `~/robot-face` and the live deployment at `/home/jarvis/robot-face` were compared file by file:
 
 ```
 SAME  app.py                          SAME  static/robot-face-gl.js
